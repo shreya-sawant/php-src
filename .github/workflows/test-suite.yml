@@ -69,7 +69,7 @@ jobs:
           lscpu
           echo "::endgroup::"
           echo "::group::Show installed packages"
-          cat /var/lib/portage/world
+          cat /var/lib/portage/world || true
           echo "::endgroup::"
       - name: ./configure
         uses: ./.github/actions/configure-gentoo

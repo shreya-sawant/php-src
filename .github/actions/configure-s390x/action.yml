@@ -13,7 +13,7 @@ runs:
   steps:
     - shell: bash
       run: |
-        set -x
+        set -eux
 
         # Install the PHP lexer generator
         sudo apt-get update

@@ -20,7 +20,6 @@ on:
       - PHP-8.5
       - PHP-8.6
       - master
-      - s390x-gha
   pull_request:
     paths-ignore: *ignore_paths
     branches:

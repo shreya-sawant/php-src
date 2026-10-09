@@ -71,8 +71,8 @@ jobs:
           echo "::group::Show installed packages"
           cat /var/lib/portage/world || true
           echo "::endgroup::"
-      - name: ./configure
-        uses: ./.github/actions/configure-gentoo
+      - name: ./configure (s390x)
+        uses: ./.github/actions/configure-s390x
         with:
           configurationParameters: >-
             CFLAGS="-fsanitize=undefined,address -fno-sanitize=function -DZEND_TRACK_ARENA_ALLOC"

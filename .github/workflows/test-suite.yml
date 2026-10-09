@@ -55,7 +55,7 @@ jobs:
   LINUX_S390X:
     if: ${{ fromJson(inputs.branch).jobs.LINUX_S390X }}
     name: LINUX_S390X_ASAN_DEBUG_ZTS
-    # This runs on a self-hosted runner; see https://wiki.php.net/systems/ci
+    # This runs on a self-hosted runner
     runs-on: s390x_ub24_04
     timeout-minutes: 180
     steps:

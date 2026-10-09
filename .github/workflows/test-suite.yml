@@ -52,6 +52,47 @@ jobs:
             --asan -x
       - name: Extra tests
         uses: ./.github/actions/extra-tests
+  LINUX_S390X:
+    if: ${{ fromJson(inputs.branch).jobs.LINUX_S390X }}
+    name: LINUX_S390X_ASAN_DEBUG_ZTS
+    # This runs on a self-hosted runner; see https://wiki.php.net/systems/ci
+    runs-on: s390x_ub24_04
+    timeout-minutes: 180
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ fromJson(inputs.branch).ref }}
+      - name: System info
+        run: |
+          echo "::group::Show host CPU info"
+          lscpu
+          echo "::endgroup::"
+          echo "::group::Show installed packages"
+          cat /var/lib/portage/world
+          echo "::endgroup::"
+      - name: ./configure
+        uses: ./.github/actions/configure-gentoo
+        with:
+          configurationParameters: >-
+            CFLAGS="-fsanitize=undefined,address -fno-sanitize=function -DZEND_TRACK_ARENA_ALLOC"
+            LDFLAGS="-fsanitize=undefined,address -fno-sanitize=function"
+            CC=clang-17
+            CXX=clang++-17
+            --enable-debug
+            --enable-zts
+          skipSlow: false # FIXME: This should likely include slow extensions
+      - name: make
+        run: make -j$(/usr/bin/nproc) >/dev/null
+      # Skip an install action for now
+      - name: Tests
+        uses: ./.github/actions/test-gentoo
+        # There is no PPC JIT, so rip this out
+        with:
+          runTestsParameters: >-
+            --asan -x
+      - name: Extra tests
+        uses: ./.github/actions/extra-tests  
   ALPINE:
     if: ${{ fromJson(inputs.branch).jobs.ALPINE }}
     name: ALPINE_X64_ASAN_DEBUG_ZTS

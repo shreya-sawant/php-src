@@ -13,15 +13,7 @@ runs:
   steps:
     - shell: bash
       run: |
-        set -x pipefail
-
-        # Install the PHP lexer generator and XML development headers
-        sudo apt-get update
-        sudo apt-get install -y re2c libxml2-dev libcurl4-openssl-dev
-
-        # Verify the required versions
-        re2c --version
-        pkg-config --modversion libxml-2.0
+        set -x
 
         ./buildconf --force
 

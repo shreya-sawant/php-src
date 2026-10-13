@@ -69,7 +69,7 @@ jobs:
           lscpu
           echo "::endgroup::"
           echo "::group::Show installed packages"
-          cat /var/lib/portage/world || true
+          dpkg -l
           echo "::endgroup::"
       - name: ./configure (s390x)
         uses: ./.github/actions/configure-s390x
@@ -84,7 +84,6 @@ jobs:
       # Skip an install action for now
       - name: Tests
         uses: ./.github/actions/test-gentoo
-        # There is no PPC JIT, so rip this out
         with:
           runTestsParameters: >-
             --asan -x

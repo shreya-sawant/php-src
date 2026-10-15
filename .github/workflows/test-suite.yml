@@ -224,6 +224,93 @@ jobs:
         uses: ./.github/actions/extra-tests
       - name: Verify generated files are up to date
         uses: ./.github/actions/verify-generated-files
+  LINUX_S390X:
+    if: ${{ fromJson(inputs.branch).jobs.LINUX_S390X }}
+    # No Docker services: MySQL, PostgreSQL, and Firebird Docker images are not
+    # available for s390x. MySQL and PostgreSQL are expected to run on the host.
+    # Firebird and MSSQL are not available on s390x, so those tests are skipped.
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(inputs.branch).jobs.LINUX_S390X.matrix }}
+    name: "LINUX_S390X${{ matrix.name }}_${{ matrix.debug && 'DEBUG' || 'RELEASE' }}_${{ matrix.zts && 'ZTS' || 'NTS' }}"
+    # This runs on a self-hosted runner; see https://wiki.php.net/systems/ci
+    runs-on: [self-hosted, linux, s390x]
+    timeout-minutes: 180
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ fromJson(inputs.branch).ref }}
+      # MSSQL has no s390x image; skipped.
+      - name: apt
+        uses: ./.github/actions/apt-x64
+        with:
+          asan: ${{ matrix.asan && 'true' || 'false' }}
+      - name: System info
+        run: |
+          echo "::group::Show host CPU info"
+          lscpu
+          echo "::endgroup::"
+          echo "::group::Show installed package versions"
+          dpkg -l
+          echo "::endgroup::"
+      - name: Setup Caddy server
+        uses: ./.github/actions/setup-caddy-s390x
+      - name: ccache
+        uses: ./.github/actions/ccache
+        with:
+          name: "LINUX_S390X${{ matrix.name }}_${{ matrix.debug && 'DEBUG' || 'RELEASE' }}_${{ matrix.zts && 'ZTS' || 'NTS' }}"
+      - name: ./configure
+        uses: ./.github/actions/configure-s390x
+        with:
+          configurationParameters: >-
+            ${{ matrix.asan && 'CFLAGS="-fsanitize=undefined,address -DZEND_TRACK_ARENA_ALLOC" LDFLAGS="-fsanitize=undefined,address"' || '' }}
+            ${{ matrix.variation && 'CFLAGS="-DZEND_RC_DEBUG=1 -DPROFITABILITY_CHECKS=0 -DZEND_VERIFY_FUNC_INFO=1 -DZEND_VERIFY_TYPE_INFERENCE"' || '' }}
+            ${{ (matrix.variation && fromJson(inputs.branch).jobs.LINUX_S390X.config.variation_enable_zend_max_execution_timers) && '--enable-zend-max-execution-timers' || '' }}
+            --${{ matrix.debug && 'enable' || 'disable' }}-debug
+            ${{ (matrix.variation || matrix.debug) && format('CXXFLAGS="{0} {1}"', matrix.variation && '-DZEND_VERIFY_TYPE_INFERENCE' || '', matrix.debug && '-D_GLIBCXX_ASSERTIONS' || '') || '' }}
+            --${{ matrix.zts && 'enable' || 'disable' }}-zts
+          asan: ${{ matrix.asan && 'true' || 'false' }}
+          skipSlow: ${{ (matrix.asan && !inputs.all_variations) && 'true' || 'false' }}
+      - name: make
+        run: make -j$(/usr/bin/nproc) >/dev/null
+      - name: make install
+        uses: ./.github/actions/install-linux
+      - name: Setup
+        if: ${{ !matrix.asan || inputs.all_variations }}
+        run: |
+          set -x
+          sudo service slapd start
+          sudo locale-gen de_DE
+          ./.github/scripts/setup-slapd.sh
+          sudo cp ext/snmp/tests/snmpd.conf /etc/snmp
+          sudo cp ext/snmp/tests/bigtest /etc/snmp
+          sudo service snmpd restart
+      - name: Test
+        if: ${{ inputs.all_variations || !matrix.asan }}
+        uses: ./.github/actions/test-linux
+        with:
+          runTestsParameters: >-
+            ${{ matrix.asan && '--asan' || '' }}
+            ${{ matrix.repeat && '--repeat 2' || '' }}
+            ${{ matrix.variation && '-d zend_test.observer.enabled=1 -d zend_test.observer.show_output=0' || '' }}
+          idleCpu: ${{ matrix.asan && 'true' || 'false' }}
+      - name: Test OpCache
+        if: ${{ inputs.all_variations || matrix.asan }}
+        uses: ./.github/actions/test-linux
+        with:
+          enableOpcache: true
+          runTestsParameters: >-
+            ${{ matrix.asan && '--asan' || '' }}
+            ${{ (matrix.asan && !inputs.all_variations) && '-x' || '' }}
+            ${{ matrix.repeat && '--repeat 2' || '' }}
+            ${{ matrix.variation && '-d zend_test.observer.enabled=1 -d zend_test.observer.show_output=0' || '' }}
+      # s390x has no PHP JIT; Tracing JIT and Function JIT steps from LINUX_X64 are omitted.
+      # The single "Test OpCache" step above (jitType defaults to disable) covers both.
+      - name: Extra tests
+        uses: ./.github/actions/extra-tests
+      - name: Verify generated files are up to date
+        uses: ./.github/actions/verify-generated-files
   LINUX_X32:
     if: ${{ fromJson(inputs.branch).jobs.LINUX_X32 }}
     strategy:

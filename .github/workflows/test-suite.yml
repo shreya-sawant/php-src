@@ -236,6 +236,13 @@ jobs:
     # This runs on a self-hosted runner; see https://wiki.php.net/systems/ci
     runs-on: [self-hosted, linux, s390x]
     timeout-minutes: 180
+    env:
+      # /home/runner/.config/ is not writable on this self-hosted runner
+      # (owned by a different system user). Redirect both gh and ccache to
+      # the per-job runner temp dir which is always writable.
+      GH_CONFIG_DIR: ${{ runner.temp }}/gh-config
+      CCACHE_CONFIGPATH: ${{ runner.temp }}/ccache.conf
+      CCACHE_DIR: ${{ runner.temp }}/ccache
     steps:
       - name: git checkout
         uses: actions/checkout@v6

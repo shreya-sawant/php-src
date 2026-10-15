@@ -293,7 +293,12 @@ jobs:
           ./.github/scripts/setup-slapd.sh
           sudo cp ext/snmp/tests/snmpd.conf /etc/snmp
           sudo cp ext/snmp/tests/bigtest /etc/snmp
-          sudo service snmpd restart
+          # On self-hosted runners snmpd may already be running from a previous
+          # job and hold port 161, causing restart to fail. Stop it first, wait
+          # for the port to be released, then start fresh.
+          sudo service snmpd stop || true
+          sleep 2
+          sudo service snmpd start
       - name: Test
         if: ${{ inputs.all_variations || !matrix.asan }}
         uses: ./.github/actions/test-linux

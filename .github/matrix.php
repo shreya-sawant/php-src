@@ -57,6 +57,7 @@ function select_jobs($repository, $trigger, $nightly, $labels, $php_version, $re
     $test_freebsd = in_array('CI: FreeBSD', $labels, true);
     $test_libmysqlclient = in_array('CI: libmysqlclient', $labels, true);
     $test_linux_ppc64 = in_array('CI: Linux PPC64', $labels, true);
+    $test_linux_s390x = in_array('CI: Linux S390X', $labels, true);
     $test_linux_x32 = in_array('CI: Linux X32', $labels, true);
     $test_linux_x64 = in_array('CI: Linux X64', $labels, true);
     $test_macos = in_array('CI: macOS', $labels, true);
@@ -97,6 +98,26 @@ function select_jobs($repository, $trigger, $nightly, $labels, $php_version, $re
     }
     if (version_compare($php_version, '8.4', '>=') && ($all_jobs || $test_linux_ppc64)) {
         $jobs['LINUX_PPC64'] = true;
+    }
+    if (version_compare($php_version, '8.4', '>=') && ($all_jobs || $test_linux_s390x)) {
+        // s390x has no PHP JIT, so the variation matrix (which exercises JIT code paths)
+        // is omitted. ASAN and debug/zts combinations are kept identical to LINUX_X64.
+        $jobs['LINUX_S390X']['matrix'] = $all_variations
+            ? [
+                'name' => [''],
+                'asan' => [false],
+                'debug' => [true, false],
+                'repeat' => [false],
+                'zts' => [true, false],
+                'include' => [
+                    ['name' => '_ASAN', 'asan' => true, 'debug' => true, 'repeat' => false, 'zts' => true],
+                ],
+            ]
+            : ['include' => [
+                ['name' => '', 'asan' => false, 'debug' => false, 'repeat' => false, 'zts' => false],
+                ['name' => '_ASAN', 'asan' => true, 'debug' => true, 'repeat' => false, 'zts' => true],
+            ]];
+        $jobs['LINUX_S390X']['config']['variation_enable_zend_max_execution_timers'] = false;
     }
     if ($all_jobs || !$no_jobs || $test_linux_x64) {
         $jobs['LINUX_X64']['matrix'] = $all_variations

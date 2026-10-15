@@ -19,6 +19,7 @@ runs:
         ./configure \
           --enable-option-checking=fatal \
           --prefix=/usr \
+          --without-pcre-jit \
           --enable-phpdbg \
           --enable-fpm \
           --with-pdo-mysql=mysqlnd \

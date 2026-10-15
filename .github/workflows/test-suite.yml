@@ -240,9 +240,10 @@ jobs:
       # /home/runner/.config/ is not writable on this self-hosted runner
       # (owned by a different system user). Redirect both gh and ccache to
       # the per-job runner temp dir which is always writable.
-      GH_CONFIG_DIR: ${{ runner.temp }}/gh-config
-      CCACHE_CONFIGPATH: ${{ runner.temp }}/ccache.conf
-      CCACHE_DIR: ${{ runner.temp }}/ccache
+      # runner.temp is not available at job-level env, use $RUNNER_TEMP instead.
+      GH_CONFIG_DIR: $RUNNER_TEMP/gh-config
+      CCACHE_CONFIGPATH: $RUNNER_TEMP/ccache.conf
+      CCACHE_DIR: $RUNNER_TEMP/ccache
     steps:
       - name: git checkout
         uses: actions/checkout@v6

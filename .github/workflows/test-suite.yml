@@ -306,7 +306,18 @@ jobs:
           # for the port to be released, then start fresh.
           sudo service snmpd stop || true
           sleep 2
-          sudo service snmpd start
+          if ! sudo service snmpd start; then
+            # Print why snmpd failed so the real cause is visible in the log.
+            echo "::group::snmpd diagnostics"
+            sudo systemctl status snmpd.service --no-pager -l || true
+            sudo journalctl -xeu snmpd.service --no-pager -n 50 || true
+            echo "--- UDP listeners on port 161 ---"
+            sudo ss -ulnp | grep ':161' || echo "nothing listening on 161"
+            echo "--- IPv6 enabled? (0 = yes, 1 = disabled) ---"
+            cat /proc/sys/net/ipv6/conf/all/disable_ipv6 || true
+            echo "::endgroup::"
+            exit 1
+          fi
       - name: Test
         if: ${{ inputs.all_variations || !matrix.asan }}
         uses: ./.github/actions/test-linux

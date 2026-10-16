@@ -288,6 +288,14 @@ jobs:
         if: ${{ !matrix.asan || inputs.all_variations }}
         run: |
           set -x
+          # Self-hosted runners are persistent, so slapd may already have been
+          # configured by a previous job. setup-slapd.sh is not idempotent
+          # (ldapmodify "add:" fails if the value exists), so reset slapd to a
+          # clean default configuration first.
+          sudo service slapd stop || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y slapd
+          sudo rm -rf /etc/ldap/slapd.d /var/lib/ldap /etc/ldap/ssl
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y slapd
           sudo service slapd start
           sudo locale-gen de_DE
           ./.github/scripts/setup-slapd.sh

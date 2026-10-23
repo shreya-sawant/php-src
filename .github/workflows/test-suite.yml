@@ -301,6 +301,17 @@ jobs:
           ./.github/scripts/setup-slapd.sh
           sudo cp ext/snmp/tests/snmpd.conf /etc/snmp
           sudo cp ext/snmp/tests/bigtest /etc/snmp
+          # snmpd.conf binds udp6:[::1]:161. If IPv6 is disabled on the host
+          # (net.ipv6.conf.all.disable_ipv6 = 1) snmpd cannot open that endpoint
+          # and exits, so drop the IPv6 listener from the installed copy only.
+          # The IPv6 SNMP tests (ipv6.phpt, bug64124.phpt) skip themselves when
+          # IPv6 is unavailable. The shared test config is left untouched.
+          if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" = "1" ]; then
+            sudo sed -i \
+              -e 's|^agentaddress .*|agentaddress udp:127.0.0.1:161|' \
+              -e '/^rocommunity6 /d' \
+              /etc/snmp/snmpd.conf
+          fi
           # On self-hosted runners snmpd may already be running from a previous
           # job and hold port 161, causing restart to fail. Stop it first, wait
           # for the port to be released, then start fresh.

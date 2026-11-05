@@ -59,14 +59,20 @@ runs:
           libsnmp-dev \
           postgresql \
           postgresql-contrib \
+          mysql-server \
           snmpd \
           snmp-mibs-downloader \
+          freetds-dev \
+          unixodbc-dev \
+          libsqliteodbc \
           llvm \
           clang \
           dovecot-core \
           dovecot-pop3d \
           dovecot-imapd \
           sendmail \
+          firebird-dev \
+          firebird3.0-server \
           liblmdb-dev \
           libtokyocabinet-dev \
           libdb-dev \

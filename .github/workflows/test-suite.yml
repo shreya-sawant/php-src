@@ -320,13 +320,21 @@ jobs:
           FB_DB=/var/lib/firebird/3.0/data/test.fdb
           grep -q '^test.fdb' /etc/firebird/3.0/databases.conf \
             || { echo "test.fdb = $FB_DB" | sudo tee -a /etc/firebird/3.0/databases.conf; sudo service firebird3.0 restart; }
-          if [ ! -f "$FB_DB" ]; then
-            echo "CREATE DATABASE 'localhost:$FB_DB' USER 'SYSDBA' PASSWORD '$FB_SYSDBA_PASSWORD';" \
-              | sudo isql-fb -q
-          fi
-          echo "CREATE USER test PASSWORD 'test';" \
-            | sudo isql-fb -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB" \
-            || true
+          # The tests run DDL as "test", so "test" must own the database (the
+          # jacobalberty/firebird image used on x64 does the same). A database
+          # owner cannot be changed, so recreate it on every run: create a
+          # throw-away DB as SYSDBA to be able to create the user, then replace
+          # it with one owned by "test".
+          sudo rm -f "$FB_DB"
+          echo "CREATE DATABASE 'localhost:$FB_DB' USER 'SYSDBA' PASSWORD '$FB_SYSDBA_PASSWORD';" \
+            | sudo isql-fb -q
+          { echo "CREATE USER test PASSWORD 'test';" \
+            | sudo isql-fb -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB"; } \
+            || { echo "ALTER USER test PASSWORD 'test';" \
+            | sudo isql-fb -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB"; }
+          sudo rm -f "$FB_DB"
+          echo "CREATE DATABASE 'localhost:$FB_DB' USER 'test' PASSWORD 'test';" \
+            | sudo isql-fb -q
           sudo cp ext/snmp/tests/snmpd.conf /etc/snmp
           sudo cp ext/snmp/tests/bigtest /etc/snmp
           # snmpd.conf binds udp6:[::1]:161. If IPv6 is disabled on the host

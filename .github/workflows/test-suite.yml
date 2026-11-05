@@ -226,9 +226,10 @@ jobs:
         uses: ./.github/actions/verify-generated-files
   LINUX_S390X:
     if: ${{ fromJson(inputs.branch).jobs.LINUX_S390X }}
-    # No Docker services: MySQL, PostgreSQL, and Firebird Docker images are not
-    # available for s390x. MySQL and PostgreSQL are expected to run on the host.
-    # Firebird and MSSQL are not available on s390x, so those tests are skipped.
+    # No Docker services: the MySQL, PostgreSQL and Firebird images are not
+    # available for s390x. Instead the "Setup" step starts the distro packages
+    # on the host with the same credentials that LINUX_X64 uses (see test-linux).
+    # There is no MSSQL for s390x, so pdo_dblib and the MSSQL ODBC tests skip.
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(inputs.branch).jobs.LINUX_S390X.matrix }}
@@ -299,13 +300,40 @@ jobs:
           sudo service slapd start
           sudo locale-gen de_DE
           ./.github/scripts/setup-slapd.sh
+          # MySQL: same credentials as the LINUX_X64 service (root/root, db "test").
+          # The runner is persistent: on the first run root authenticates via the
+          # unix socket (no password), afterwards it needs the password set here.
+          sudo service mysql start
+          sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'root'; CREATE DATABASE IF NOT EXISTS test;" \
+            || mysql -h localhost -uroot -proot -e "CREATE DATABASE IF NOT EXISTS test;"
+          # PostgreSQL: same credentials as the LINUX_X64 service (postgres/postgres, db "test").
+          sudo service postgresql start
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+          sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='test'" | grep -q 1 \
+            || sudo -u postgres createdb test
+          # Firebird: same credentials as the LINUX_X64 service (test/test, db "test.fdb").
+          # UNVERIFIED on s390x: paths and user creation follow the Debian/Ubuntu
+          # firebird3.0-server package layout.
+          sudo service firebird3.0 start
+          FB_SYSDBA_PASSWORD=$(sudo sed -n 's/^ISC_PASSWORD=//p' /etc/firebird/3.0/SYSDBA.password)
+          FB_DB=/var/lib/firebird/3.0/data/test.fdb
+          grep -q '^test.fdb' /etc/firebird/3.0/databases.conf \
+            || { echo "test.fdb = $FB_DB" | sudo tee -a /etc/firebird/3.0/databases.conf; sudo service firebird3.0 restart; }
+          if [ ! -f "$FB_DB" ]; then
+            echo "CREATE DATABASE 'localhost:$FB_DB' USER 'SYSDBA' PASSWORD '$FB_SYSDBA_PASSWORD';" \
+              | sudo isql-fb -q
+          fi
+          echo "CREATE USER test PASSWORD 'test';" \
+            | sudo isql-fb -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB" \
+            || true
           sudo cp ext/snmp/tests/snmpd.conf /etc/snmp
           sudo cp ext/snmp/tests/bigtest /etc/snmp
           # snmpd.conf binds udp6:[::1]:161. If IPv6 is disabled on the host
           # (net.ipv6.conf.all.disable_ipv6 = 1) snmpd cannot open that endpoint
           # and exits, so drop the IPv6 listener from the installed copy only.
-          # The IPv6 SNMP tests (ipv6.phpt, bug64124.phpt) skip themselves when
-          # IPv6 is unavailable. The shared test config is left untouched.
+          # NOTE: the IPv6 SNMP tests (ipv6.phpt, bug64124.phpt) do not skip when
+          # IPv6 is disabled, so they will fail on such a host.
+          # The shared test config is left untouched.
           if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" = "1" ]; then
             sudo sed -i \
               -e 's|^agentaddress .*|agentaddress udp:127.0.0.1:161|' \
@@ -348,8 +376,8 @@ jobs:
             ${{ (matrix.asan && !inputs.all_variations) && '-x' || '' }}
             ${{ matrix.repeat && '--repeat 2' || '' }}
             ${{ matrix.variation && '-d zend_test.observer.enabled=1 -d zend_test.observer.show_output=0' || '' }}
-      # s390x has no PHP JIT; Tracing JIT and Function JIT steps from LINUX_X64 are omitted.
-      # The single "Test OpCache" step above (jitType defaults to disable) covers both.
+      # s390x has no PHP JIT (ext/opcache/config.m4 only enables it on x86/aarch64),
+      # so the Tracing JIT and Function JIT steps from LINUX_X64 are omitted.
       - name: Extra tests
         uses: ./.github/actions/extra-tests
       - name: Verify generated files are up to date

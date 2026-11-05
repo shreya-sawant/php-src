@@ -315,7 +315,8 @@ jobs:
           # UNVERIFIED on s390x: paths and user creation follow the Debian/Ubuntu
           # firebird3.0-server package layout.
           sudo service firebird3.0 start
-          FB_SYSDBA_PASSWORD=$(sudo sed -n 's/^ISC_PASSWORD=//p' /etc/firebird/3.0/SYSDBA.password)
+          # The file stores the password quoted (ISC_PASSWORD="..."), so strip the quotes.
+          FB_SYSDBA_PASSWORD=$(sudo sed -n 's/^ISC_PASSWORD=//p' /etc/firebird/3.0/SYSDBA.password | tr -d '"')
           FB_DB=/var/lib/firebird/3.0/data/test.fdb
           grep -q '^test.fdb' /etc/firebird/3.0/databases.conf \
             || { echo "test.fdb = $FB_DB" | sudo tee -a /etc/firebird/3.0/databases.conf; sudo service firebird3.0 restart; }

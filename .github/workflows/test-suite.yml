@@ -321,19 +321,25 @@ jobs:
           grep -q '^test.fdb' /etc/firebird/3.0/databases.conf \
             || { echo "test.fdb = $FB_DB" | sudo tee -a /etc/firebird/3.0/databases.conf; sudo service firebird3.0 restart; }
           # The tests run DDL as "test", so "test" must own the database (the
-          # jacobalberty/firebird image used on x64 does the same). A database
-          # owner cannot be changed, so recreate it on every run: create a
-          # throw-away DB as SYSDBA to be able to create the user, then replace
-          # it with one owned by "test".
+          # jacobalberty/firebird image used on x64 is assumed to do the same).
+          # A database owner cannot be changed, so recreate it on every run:
+          # create a throw-away DB as SYSDBA to be able to manage users, then
+          # replace it with one owned by "test".
+          # A plain Firebird user is not allowed to create databases ("no
+          # permission for CREATE access to DATABASE"), so "test" is made an
+          # admin and creates the database with ROLE RDB$ADMIN.
+          # UNVERIFIED: that this is sufficient for the tests' DDL on s390x.
           sudo rm -f "$FB_DB"
           echo "CREATE DATABASE 'localhost:$FB_DB' USER 'SYSDBA' PASSWORD '$FB_SYSDBA_PASSWORD';" \
             | sudo isql-fb -q
-          { echo "CREATE USER test PASSWORD 'test';" \
-            | sudo isql-fb -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB"; } \
-            || { echo "ALTER USER test PASSWORD 'test';" \
-            | sudo isql-fb -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB"; }
+          # Run both statements so the result is the same whether or not the
+          # user already exists from a previous run (the runner is persistent).
+          echo "CREATE USER test PASSWORD 'test' GRANT ADMIN ROLE;" \
+            | sudo isql-fb -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB" || true
+          echo "ALTER USER test SET PASSWORD 'test' GRANT ADMIN ROLE;" \
+            | sudo isql-fb -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB" || true
           sudo rm -f "$FB_DB"
-          echo "CREATE DATABASE 'localhost:$FB_DB' USER 'test' PASSWORD 'test';" \
+          echo "CREATE DATABASE 'localhost:$FB_DB' USER 'test' PASSWORD 'test' ROLE 'RDB\$ADMIN';" \
             | sudo isql-fb -q
           sudo cp ext/snmp/tests/snmpd.conf /etc/snmp
           sudo cp ext/snmp/tests/bigtest /etc/snmp

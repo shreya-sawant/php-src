@@ -1464,9 +1464,7 @@ PHPDBG_COMMAND(clear) /* {{{ */
 
 PHPDBG_COMMAND(list) /* {{{ */
 {
-	if (!param) {
-		return PHPDBG_LIST_HANDLER(lines)(PHPDBG_COMMAND_ARGS);
-	} else switch (param->type) {
+	switch (param->type) {
 		case NUMERIC_PARAM:
 			return PHPDBG_LIST_HANDLER(lines)(PHPDBG_COMMAND_ARGS);
 
@@ -1817,7 +1815,7 @@ next:
 			}
 		}
 	}
-	zend_error_noreturn(E_ERROR, "Arrived at end of main loop which shouldn't happen");
+	zend_error_noreturn(E_CORE_ERROR, "Arrived at end of main loop which shouldn't happen");
 } /* }}} */
 
 /* only if *not* interactive and while executing */

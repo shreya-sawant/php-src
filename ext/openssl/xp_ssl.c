@@ -541,7 +541,7 @@ static bool php_openssl_matches_san_list(
 				/* TODO: warn ? */
 				continue;
 			}
-			if ((size_t)ASN1_STRING_length(san->d.dNSName) != strlen((const char*)cert_name)) {
+			if (ASN1_STRING_get_length(san->d.dNSName) != strlen((const char*)cert_name)) {
 				OPENSSL_free(cert_name);
 				/* prevent null-byte poisoning*/
 				continue;
@@ -561,7 +561,7 @@ static bool php_openssl_matches_san_list(
 			}
 			OPENSSL_free(cert_name);
 		} else if (san->type == GEN_IPADD) {
-			if (ASN1_STRING_length(san->d.iPAddress) == 4) {
+			if (ASN1_STRING_get_length(san->d.iPAddress) == 4) {
 				snprintf(ipbuffer, sizeof(ipbuffer), "%d.%d.%d.%d",
 					ASN1_STRING_get0_data(san->d.iPAddress)[0],
 					ASN1_STRING_get0_data(san->d.iPAddress)[1],
@@ -575,7 +575,7 @@ static bool php_openssl_matches_san_list(
 				}
 			}
 #ifdef HAVE_IPV6_SAN
-			else if (ASN1_STRING_length(san->d.ip) == 16 && subject_name_is_ipv6) {
+			else if (ASN1_STRING_get_length(san->d.ip) == 16 && subject_name_is_ipv6) {
 				ipbuffer[0] = 0;
 				EXPAND_IPV6_ADDRESS(ipbuffer, ASN1_STRING_get0_data(san->d.iPAddress));
 				if (strcasecmp((const char*)subject_name_ipv6_expanded, (const char*)ipbuffer) == 0) {
@@ -630,7 +630,7 @@ static bool php_openssl_matches_common_name(php_stream *stream, const X509 *peer
 		return false;
 	}
 	name_asn1 = X509_NAME_ENTRY_get_data(name_entry);
-	cert_name_len = ASN1_STRING_length(name_asn1);
+	cert_name_len = ASN1_STRING_get_length(name_asn1);
 	cert_name = (unsigned char *) OPENSSL_strndup((const char *) ASN1_STRING_get0_data(name_asn1), cert_name_len);
 	if (cert_name == NULL) {
 		php_stream_warn(stream, NetworkRecvFailed, "Unable to locate peer certificate CN");
@@ -785,7 +785,8 @@ static int php_openssl_win_cert_verify_callback(X509_STORE_CTX *x509_store_ctx, 
 	bool is_self_signed = false;
 
 
-	stream = (php_stream*)arg;
+	SSL *ssl = X509_STORE_CTX_get_ex_data(x509_store_ctx, SSL_get_ex_data_X509_STORE_CTX_idx());
+	stream = (php_stream*)SSL_get_ex_data(ssl, php_openssl_get_ssl_stream_data_index());
 	sslsock = (php_openssl_netstream_data_t*)stream->abstract;
 
 	{ /* First convert the x509 struct back to a DER encoded buffer and let Windows decode it into a form it can work with */
@@ -1020,7 +1021,7 @@ static zend_result php_openssl_enable_peer_verification(SSL_CTX *ctx, php_stream
 		}
 	} else {
 #ifdef PHP_WIN32
-		SSL_CTX_set_cert_verify_callback(ctx, php_openssl_win_cert_verify_callback, (void *)stream);
+		SSL_CTX_set_cert_verify_callback(ctx, php_openssl_win_cert_verify_callback, NULL);
 #else
 		if (sslsock->is_client && !SSL_CTX_set_default_verify_paths(ctx)) {
 			php_stream_warn(stream, ProtocolError,
@@ -1203,23 +1204,27 @@ static void php_openssl_limit_handshake_reneg(const SSL *ssl) /* {{{ */
 	/* The token level exceeds our allowed limit */
 	if (sslsock->reneg->tokens > sslsock->reneg->limit) {
 		zval *val;
-
-
 		sslsock->reneg->should_close = 1;
 
 		if (PHP_STREAM_CONTEXT(stream) && (val = php_stream_context_get_option(PHP_STREAM_CONTEXT(stream),
 				"ssl", "reneg_limit_callback")) != NULL
 		) {
+			zend_fcall_info_cache fcc;
+
+			if (!zend_is_callable(val, &fcc, NULL)) {
+				php_stream_warn(stream, UserspaceCallFailed, "SSL: failed invoking reneg limit notification callback");
+				return;
+			}
 			zval param, retval;
 
 			php_stream_to_zval(stream, &param);
 
 			/* Closing the stream inside this callback would segfault! */
 			stream->flags |= PHP_STREAM_FLAG_NO_FCLOSE;
-			if (FAILURE == call_user_function(NULL, NULL, val, &retval, 1, &param)) {
-				php_stream_warn(stream, UserspaceCallFailed, "SSL: failed invoking reneg limit notification callback");
-			}
+			zend_call_known_fcc(&fcc, &retval, 1, &param, NULL);
 			stream->flags ^= PHP_STREAM_FLAG_NO_FCLOSE;
+			/* Release potential trampoline */
+			zend_release_fcall_info_cache(&fcc);
 
 			/* If the reneg_limit_callback returned true don't auto-close */
 			if (Z_TYPE(retval) == IS_TRUE) {
@@ -1649,7 +1654,10 @@ static int php_openssl_server_alpn_callback(SSL *ssl_handle,
 		const unsigned char **out, unsigned char *outlen,
 		const unsigned char *in, unsigned int inlen, void *arg) /* {{{ */
 {
-	php_openssl_netstream_data_t *sslsock = arg;
+	php_stream *stream = (php_stream *)SSL_get_ex_data(ssl_handle, php_openssl_get_ssl_stream_data_index());
+	php_openssl_netstream_data_t *sslsock = (php_openssl_netstream_data_t *)stream->abstract;
+
+	ZEND_ASSERT(sslsock->alpn_ctx.data != NULL);
 
 	if (SSL_select_next_proto((unsigned char **)out, outlen, sslsock->alpn_ctx.data, sslsock->alpn_ctx.len, in, inlen) != OPENSSL_NPN_NEGOTIATED) {
 		return SSL_TLSEXT_ERR_NOACK;
@@ -1772,8 +1780,6 @@ static unsigned int php_openssl_psk_client_cb(SSL *ssl, const char *hint,
 		unsigned char *psk_out, unsigned int max_psk_len)
 {
 	(void)hint; /* identity hint deliberately not exposed as it is useless */
-	(void)max_identity_len;
-	(void)max_psk_len;
 
 	php_stream *stream = (php_stream *)SSL_get_ex_data(ssl,
 			php_openssl_get_ssl_stream_data_index());
@@ -1788,10 +1794,18 @@ static unsigned int php_openssl_psk_client_cb(SSL *ssl, const char *hint,
 		return 0;
 	}
 
+	bool originally_no_fclose = stream->flags & PHP_STREAM_FLAG_NO_FCLOSE;
+	stream->flags |= PHP_STREAM_FLAG_NO_FCLOSE;
 	zval result;
 	if (php_openssl_call_psk_cb(stream, &sslsock->psk_callbacks->client_cb,
 			NULL, 0, &result) != SUCCESS) {
+		if (!originally_no_fclose) {
+			stream->flags ^= PHP_STREAM_FLAG_NO_FCLOSE;
+		}
 		return 0;
+	}
+	if (!originally_no_fclose) {
+		stream->flags ^= PHP_STREAM_FLAG_NO_FCLOSE;
 	}
 
 	if (Z_TYPE(result) == IS_NULL) {
@@ -1812,6 +1826,18 @@ static unsigned int php_openssl_psk_client_cb(SSL *ssl, const char *hint,
 		return 0;
 	}
 
+	/* Returned lengths are untrusted, so bound them to the buffers. */
+	if (ZSTR_LEN(identity_str) >= max_identity_len) {
+		zend_value_error("PSK identity must be shorter than %u bytes", max_identity_len);
+		zval_ptr_dtor(&result);
+		return 0;
+	}
+	if (ZSTR_LEN(psk_str) > max_psk_len) {
+		zend_value_error("PSK key must not exceed %u bytes", max_psk_len);
+		zval_ptr_dtor(&result);
+		return 0;
+	}
+
 	memcpy(identity_out, ZSTR_VAL(identity_str), ZSTR_LEN(identity_str));
 	identity_out[ZSTR_LEN(identity_str)] = '\0';
 	memcpy(psk_out, ZSTR_VAL(psk_str), ZSTR_LEN(psk_str));
@@ -1824,8 +1850,6 @@ static unsigned int php_openssl_psk_client_cb(SSL *ssl, const char *hint,
 static unsigned int php_openssl_psk_server_cb(SSL *ssl, const char *identity,
 		unsigned char *psk_out, unsigned int max_psk_len)
 {
-	(void)max_psk_len;
-
 	php_stream *stream = (php_stream *)SSL_get_ex_data(ssl,
 			php_openssl_get_ssl_stream_data_index());
 	if (stream == NULL) {
@@ -1861,6 +1885,13 @@ static unsigned int php_openssl_psk_server_cb(SSL *ssl, const char *identity,
 
 	zend_string *psk_str = php_openssl_psk_get_psk(&result);
 	if (psk_str == NULL) {
+		zval_ptr_dtor(&result);
+		return 0;
+	}
+
+	/* Returned length is untrusted, so bound it to the buffer. */
+	if (ZSTR_LEN(psk_str) > max_psk_len) {
+		zend_value_error("PSK key must not exceed %u bytes", max_psk_len);
 		zval_ptr_dtor(&result);
 		return 0;
 	}
@@ -1930,6 +1961,14 @@ static int php_openssl_psk_use_session_cb(SSL *ssl, const EVP_MD *md,
 		return 0;
 	}
 
+	/* Returned length is untrusted, so bound it to the buffer. */
+	if (ZSTR_LEN(identity_str) > PHP_OPENSSL_PSK_MAX_IDENTITY_LEN) {
+		zend_value_error("PSK identity must not exceed %d bytes", PHP_OPENSSL_PSK_MAX_IDENTITY_LEN);
+		SSL_SESSION_free(session);
+		zval_ptr_dtor(&result);
+		return 0;
+	}
+
 	/* Identity buffer must outlive this callback. */
 	if (sslsock->psk_identity_buf == NULL) {
 		sslsock->psk_identity_buf = emalloc(PHP_OPENSSL_PSK_MAX_IDENTITY_LEN);
@@ -1962,10 +2001,18 @@ static int php_openssl_psk_find_session_cb(SSL *ssl, const unsigned char *identi
 		return 1;
 	}
 
+	bool originally_no_fclose = stream->flags & PHP_STREAM_FLAG_NO_FCLOSE;
+	stream->flags |= PHP_STREAM_FLAG_NO_FCLOSE;
 	zval result;
 	if (php_openssl_call_psk_cb(stream, &sslsock->psk_callbacks->server_cb,
 			identity, identity_len, &result) != SUCCESS) {
+		if (!originally_no_fclose) {
+			stream->flags ^= PHP_STREAM_FLAG_NO_FCLOSE;
+		}
 		return 0;
+	}
+	if (!originally_no_fclose) {
+		stream->flags ^= PHP_STREAM_FLAG_NO_FCLOSE;
 	}
 
 	if (Z_TYPE(result) == IS_NULL) {
@@ -2008,13 +2055,9 @@ static zend_result php_openssl_validate_and_allocate_psk_callback(
 	char *is_callable_error = NULL;
 	zend_fcall_info_cache fcc = {0};
 	if (!zend_is_callable(callable, &fcc, &is_callable_error)) {
-		if (is_callable_error) {
-			zend_type_error("%s must be a valid callback, %s",
-					callback_name, is_callable_error);
-			efree(is_callable_error);
-		} else {
-			zend_type_error("%s must be a valid callback", callback_name);
-		}
+		zend_type_error("%s must be a valid callback, %s",
+				callback_name, is_callable_error);
+		efree(is_callable_error);
 		return FAILURE;
 	}
 
@@ -2131,12 +2174,8 @@ static zend_result php_openssl_setup_server_early_data(php_stream *stream,
 		char *is_callable_error = NULL;
 		zend_fcall_info_cache fcc = {0};
 		if (!zend_is_callable(val, &fcc, &is_callable_error)) {
-			if (is_callable_error) {
-				zend_type_error("early_data_cb must be a valid callback, %s", is_callable_error);
-				efree(is_callable_error);
-			} else {
-				zend_type_error("early_data_cb must be a valid callback");
-			}
+			zend_type_error("early_data_cb must be a valid callback, %s", is_callable_error);
+			efree(is_callable_error);
 			return FAILURE;
 		}
 
@@ -2200,7 +2239,12 @@ static int php_openssl_session_new_cb(SSL *ssl, SSL_SESSION *session)
 	ZVAL_RES(&args[0], stream->res);
 	php_openssl_session_object_init(&args[1], session);
 
+	bool originally_no_fclose = stream->flags & PHP_STREAM_FLAG_NO_FCLOSE;
+	stream->flags |= PHP_STREAM_FLAG_NO_FCLOSE;
 	zend_call_known_fcc(&sslsock->session_callbacks->new_cb, NULL, 2, args, NULL);
+	if (!originally_no_fclose) {
+		stream->flags ^= PHP_STREAM_FLAG_NO_FCLOSE;
+	}
 
 	zval_ptr_dtor(&args[1]);
 
@@ -2233,7 +2277,12 @@ static SSL_SESSION *php_openssl_session_get_cb(SSL *ssl, const unsigned char *se
 
 	SSL_SESSION *session = NULL;
 
+	bool originally_no_fclose = stream->flags & PHP_STREAM_FLAG_NO_FCLOSE;
+	stream->flags |= PHP_STREAM_FLAG_NO_FCLOSE;
 	zend_call_known_fcc(&sslsock->session_callbacks->get_cb, &retval, 2, args, NULL);
+	if (!originally_no_fclose) {
+		stream->flags ^= PHP_STREAM_FLAG_NO_FCLOSE;
+	}
 	zval_ptr_dtor(&args[1]);
 
 	if (php_openssl_is_session_ce(&retval)) {
@@ -2243,7 +2292,7 @@ static SSL_SESSION *php_openssl_session_get_cb(SSL *ssl, const unsigned char *se
 			SSL_SESSION_up_ref(obj->session);
 			session = obj->session;
 		}
-	} else if (Z_TYPE(retval) != IS_NULL) {
+	} else if (!Z_ISUNDEF(retval) && Z_TYPE(retval) != IS_NULL) {
 		zend_type_error("session_get_cb return type must be null or Openssl\\Session");
 	}
 
@@ -2319,12 +2368,8 @@ static zend_result php_openssl_validate_and_allocate_session_callback(
 	/* Validate callable */
 	zend_fcall_info_cache fcc;
 	if (!zend_is_callable(callable, &fcc, &is_callable_error)) {
-		if (is_callable_error) {
-			zend_type_error("%s must be a valid callback, %s", callback_name, is_callable_error);
-			efree(is_callable_error);
-		} else {
-			zend_type_error("%s must be a valid callback", callback_name);
-		}
+		zend_type_error("%s must be a valid callback, %s", callback_name, is_callable_error);
+		efree(is_callable_error);
 		return FAILURE;
 	}
 
@@ -2684,7 +2729,7 @@ static zend_result php_openssl_create_server_ctx(php_stream *stream,
 			} else {
 				sslsock->alpn_ctx.data = (unsigned char *) pestrndup((const char*)alpn, alpn_len, php_stream_is_persistent(stream));
 				sslsock->alpn_ctx.len = alpn_len;
-				SSL_CTX_set_alpn_select_cb(sslsock->ctx, php_openssl_server_alpn_callback, sslsock);
+				SSL_CTX_set_alpn_select_cb(sslsock->ctx, php_openssl_server_alpn_callback, NULL);
 			}
 
 			efree(alpn);
@@ -2774,9 +2819,27 @@ static zend_result php_openssl_setup_crypto(php_stream *stream,
 			php_stream_warn(stream, SslNotSupported, "Supplied SSL session stream is not set up");
 		} else if (sslsock->is_client && parent_sslsock->ssl_handle == NULL) {
 			php_stream_warn(stream, SslNotSupported, "Supplied SSL session stream is not initialized");
+		} else if (php_stream_is_persistent(stream) &&
+			  (parent_sslsock->session_callbacks
+			   || parent_sslsock->psk_callbacks
+#if defined(HAVE_TLS13)
+			   || parent_sslsock->early_data_callbacks
+#endif
+			  )) {
+			php_stream_warn(stream, PersistentNotSupported, "Supplied SSL session stream with callbacks is not supported for persistent streams");
 		} else {
 			SSL_CTX_up_ref(parent_sslsock->ctx);
 			sslsock->ctx = parent_sslsock->ctx;
+#ifdef HAVE_TLS_ALPN
+			if (parent_sslsock->alpn_ctx.data) {
+				if (sslsock->alpn_ctx.data) {
+					pefree(sslsock->alpn_ctx.data, php_stream_is_persistent(stream));
+				}
+				sslsock->alpn_ctx.data = (unsigned char *) pestrndup((const char *) parent_sslsock->alpn_ctx.data,
+					parent_sslsock->alpn_ctx.len, php_stream_is_persistent(stream));
+				sslsock->alpn_ctx.len = parent_sslsock->alpn_ctx.len;
+			}
+#endif
 			if (parent_sslsock->session_callbacks) {
 				parent_sslsock->session_callbacks->refcount++;
 				sslsock->session_callbacks = parent_sslsock->session_callbacks;
@@ -2952,8 +3015,13 @@ static int php_openssl_handshake_server_early_data(php_stream *stream,
 				zval args[2];
 				ZVAL_RES(&args[0], stream->res);
 				ZVAL_STRINGL(&args[1], (char *) buf, readbytes);
+				bool originally_no_fclose = stream->flags & PHP_STREAM_FLAG_NO_FCLOSE;
+				stream->flags |= PHP_STREAM_FLAG_NO_FCLOSE;
 				zend_call_known_fcc(&sslsock->early_data_callbacks->read_cb,
 						NULL, 2, args, NULL);
+				if (!originally_no_fclose) {
+					stream->flags ^= PHP_STREAM_FLAG_NO_FCLOSE;
+				}
 				zval_ptr_dtor(&args[1]);
 			}
 			continue;
@@ -3376,6 +3444,10 @@ static int php_openssl_sockop_close(php_stream *stream, int close_handle) /* {{{
 			sslsock->ssl_handle = NULL;
 		}
 		if (sslsock->ctx) {
+			/* Clear the ctx stream pointer as the ctx may outlive this stream. */
+			if (SSL_CTX_get_ex_data(sslsock->ctx, php_openssl_get_ctx_stream_data_index()) == stream) {
+				SSL_CTX_set_ex_data(sslsock->ctx, php_openssl_get_ctx_stream_data_index(), NULL);
+			}
 			SSL_CTX_free(sslsock->ctx);
 			sslsock->ctx = NULL;
 		}

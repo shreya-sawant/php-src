@@ -1,5 +1,5 @@
 /* This is a generated file, edit basic_functions.stub.php instead.
- * Stub hash: 9e08e1c2517576dbce825322fe93cbce3054f23e
+ * Stub hash: 5ccf5208c22244d77b47ac0f2363bf67eccb0e95
  * Has decl header: yes */
 
 #include "zend_attributes.h"
@@ -544,11 +544,11 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_print_r, 0, 1, MAY_BE_STRING|MAY
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, return, _IS_BOOL, 0, "false")
 ZEND_END_ARG_INFO()
 
-#define arginfo_connection_aborted arginfo_ob_get_level
+#define arginfo_connection_aborted arginfo_ob_flush
 
 #define arginfo_connection_status arginfo_ob_get_level
 
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_ignore_user_abort, 0, 0, IS_LONG, 0)
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_ignore_user_abort, 0, 0, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, enable, _IS_BOOL, 1, "null")
 ZEND_END_ARG_INFO()
 
@@ -3158,14 +3158,14 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(ftok, arginfo_ftok)
 #endif
 	ZEND_FE(hrtime, arginfo_hrtime)
-	ZEND_FE(md5, arginfo_md5)
+	ZEND_RAW_FENTRY("md5", zif_md5, arginfo_md5, ZEND_ACC_COMPILE_TIME_EVAL, NULL, NULL)
 	ZEND_FE(md5_file, arginfo_md5_file)
 	ZEND_FE(getmyuid, arginfo_getmyuid)
 	ZEND_FE(getmygid, arginfo_getmygid)
 	ZEND_FE(getmypid, arginfo_getmypid)
 	ZEND_FE(getmyinode, arginfo_getmyinode)
 	ZEND_FE(getlastmod, arginfo_getlastmod)
-	ZEND_FE(sha1, arginfo_sha1)
+	ZEND_RAW_FENTRY("sha1", zif_sha1, arginfo_sha1, ZEND_ACC_COMPILE_TIME_EVAL, NULL, NULL)
 	ZEND_FE(sha1_file, arginfo_sha1_file)
 #if defined(HAVE_SYSLOG_H)
 	ZEND_FE(openlog, arginfo_openlog)

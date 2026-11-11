@@ -75,16 +75,16 @@ static zend_string *validate_allow_dynamic_properties(
 	ZEND_ASSERT(scope != NULL);
 	const char *msg = NULL;
 	if (scope->ce_flags & ZEND_ACC_TRAIT) {
-		msg = "Cannot apply #[\\AllowDynamicProperties] to trait %s";
+		msg = "Cannot apply #[\\AllowDynamicProperties] to trait %pS";
 	} else if (scope->ce_flags & ZEND_ACC_INTERFACE) {
-		msg = "Cannot apply #[\\AllowDynamicProperties] to interface %s";
+		msg = "Cannot apply #[\\AllowDynamicProperties] to interface %pS";
 	} else if (scope->ce_flags & ZEND_ACC_READONLY_CLASS) {
-		msg = "Cannot apply #[\\AllowDynamicProperties] to readonly class %s";
+		msg = "Cannot apply #[\\AllowDynamicProperties] to readonly class %pS";
 	} else if (scope->ce_flags & ZEND_ACC_ENUM) {
-		msg = "Cannot apply #[\\AllowDynamicProperties] to enum %s";
+		msg = "Cannot apply #[\\AllowDynamicProperties] to enum %pS";
 	}
 	if (msg != NULL) {
-		return zend_strpprintf(0, msg, ZSTR_VAL(scope->name));
+		return zend_strpprintf(0, msg, scope->name);
 	}
 	scope->ce_flags |= ZEND_ACC_ALLOW_DYNAMIC_PROPERTIES;
 	return NULL;
@@ -95,16 +95,16 @@ static zend_string *validate_attribute(
 {
 	const char *msg = NULL;
 	if (scope->ce_flags & ZEND_ACC_TRAIT) {
-		msg = "Cannot apply #[\\Attribute] to trait %s";
+		msg = "Cannot apply #[\\Attribute] to trait %pS";
 	} else if (scope->ce_flags & ZEND_ACC_INTERFACE) {
-		msg = "Cannot apply #[\\Attribute] to interface %s";
+		msg = "Cannot apply #[\\Attribute] to interface %pS";
 	} else if (scope->ce_flags & ZEND_ACC_ENUM) {
-		msg = "Cannot apply #[\\Attribute] to enum %s";
+		msg = "Cannot apply #[\\Attribute] to enum %pS";
 	} else if (scope->ce_flags & ZEND_ACC_EXPLICIT_ABSTRACT_CLASS) {
-		msg = "Cannot apply #[\\Attribute] to abstract class %s";
+		msg = "Cannot apply #[\\Attribute] to abstract class %pS";
 	}
 	if (msg != NULL) {
-		return zend_strpprintf(0, msg, ZSTR_VAL(scope->name));
+		return zend_strpprintf(0, msg, scope->name);
 	}
 	return NULL;
 }
@@ -120,7 +120,7 @@ static zend_string *validate_deprecated(
 	}
 	if (!(scope->ce_flags & ZEND_ACC_TRAIT)) {
 		const char *type = zend_get_object_type_case(scope, false);
-		return zend_strpprintf(0, "Cannot apply #[\\Deprecated] to %s %s", type, ZSTR_VAL(scope->name));
+		return zend_strpprintf(0, "Cannot apply #[\\Deprecated] to %s %pS", type, scope->name);
 	}
 
 	scope->ce_flags |= ZEND_ACC_DEPRECATED;
@@ -155,6 +155,12 @@ ZEND_METHOD(SensitiveParameter, __construct)
 	ZEND_PARSE_PARAMETERS_NONE();
 }
 
+void zend_sensitive_parameter_value_init(zend_object *obj, zval *value)
+{
+	ZEND_ASSERT(obj->ce == zend_ce_sensitive_parameter_value);
+	zend_update_property_ex(zend_ce_sensitive_parameter_value, obj, ZSTR_KNOWN(ZEND_STR_VALUE), value);
+}
+
 ZEND_METHOD(SensitiveParameterValue, __construct)
 {
 	zval *value;
@@ -163,7 +169,7 @@ ZEND_METHOD(SensitiveParameterValue, __construct)
 		Z_PARAM_ZVAL(value)
 	ZEND_PARSE_PARAMETERS_END();
 
-	zend_update_property_ex(zend_ce_sensitive_parameter_value, Z_OBJ_P(ZEND_THIS), ZSTR_KNOWN(ZEND_STR_VALUE), value);
+	zend_sensitive_parameter_value_init(Z_OBJ_P(ZEND_THIS), value);
 }
 
 ZEND_METHOD(SensitiveParameterValue, getValue)
@@ -531,7 +537,7 @@ ZEND_API zend_internal_attribute *zend_mark_internal_attribute(zend_class_entry 
 	zend_attribute *attr;
 
 	if (ce->type != ZEND_INTERNAL_CLASS) {
-		zend_error_noreturn(E_ERROR, "Only internal classes can be registered as compiler attribute");
+		zend_error_noreturn(E_CORE_ERROR, "Only internal classes can be registered as compiler attribute");
 	}
 
 	ZEND_HASH_FOREACH_PTR(ce->attributes, attr) {
@@ -549,7 +555,7 @@ ZEND_API zend_internal_attribute *zend_mark_internal_attribute(zend_class_entry 
 		}
 	} ZEND_HASH_FOREACH_END();
 
-	zend_error_noreturn(E_ERROR, "Classes must be first marked as attribute before being able to be registered as internal attribute class");
+	zend_error_noreturn(E_CORE_ERROR, "Classes must be first marked as attribute before being able to be registered as internal attribute class");
 }
 
 ZEND_API zend_internal_attribute *zend_internal_attribute_register(zend_class_entry *ce, uint32_t flags)

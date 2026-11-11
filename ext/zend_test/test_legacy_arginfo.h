@@ -1,5 +1,5 @@
 /* This is a generated file, edit test.stub.php instead.
- * Stub hash: 0d233e99eed49cad1bb8e52c28d14ba2a6054b03
+ * Stub hash: 64eb27c89a9a5a378385e5f778cd17cfd67caed8
  * Has decl header: yes */
 
 #include "zend_constants.h"
@@ -16,6 +16,10 @@ ZEND_END_ARG_INFO()
 
 #define arginfo_zend_test_void_return arginfo_zend_trigger_bailout
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_forward_reference, 0, 1, 1)
+	ZEND_ARG_INFO(1, value)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_compile_string, 0, 0, 3)
 	ZEND_ARG_INFO(0, source_string)
 	ZEND_ARG_INFO(0, filename)
@@ -31,6 +35,8 @@ ZEND_END_ARG_INFO()
 #define arginfo_zend_test_nodiscard arginfo_zend_trigger_bailout
 
 #define arginfo_zend_test_deprecated_nodiscard arginfo_zend_trigger_bailout
+
+#define arginfo_zend_test_child_init_count arginfo_zend_trigger_bailout
 
 #define arginfo_zend_test_aliased arginfo_zend_trigger_bailout
 
@@ -58,6 +64,13 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_erealloc_block_size, 0, 0, 2)
 	ZEND_ARG_INFO(0, old_size)
 	ZEND_ARG_INFO(0, new_size)
 ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_serialization_bailout, 0, 0, 2)
+	ZEND_ARG_INFO(0, unserialize)
+	ZEND_ARG_INFO(0, locked)
+ZEND_END_ARG_INFO()
+
+#define arginfo_zend_test_serialization_state arginfo_zend_trigger_bailout
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_bool, 0, 0, 1)
 	ZEND_ARG_INFO(0, param)
@@ -137,6 +150,14 @@ ZEND_END_ARG_INFO()
 
 #define arginfo_zend_resource_or_null_slow_zpp arginfo_zend_bool
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_emalloc, 0, 0, 1)
+	ZEND_ARG_INFO(0, size)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_callback, 0, 0, 1)
+	ZEND_ARG_INFO(0, callback)
+ZEND_END_ARG_INFO()
+
 #define arginfo_zend_string_or_object arginfo_zend_bool
 
 #define arginfo_zend_string_or_object_or_null arginfo_zend_bool
@@ -189,6 +210,11 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_object_init_with_constructor, 0, 0, 1)
 	ZEND_ARG_INFO(0, class)
 	ZEND_ARG_VARIADIC_INFO(0, args)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_object_init_with_constructor_array, 0, 0, 2)
+	ZEND_ARG_INFO(0, class)
+	ZEND_ARG_INFO(0, args)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_call_method_if_exists, 0, 0, 2)
@@ -280,6 +306,19 @@ ZEND_END_ARG_INFO()
 
 #define arginfo_zend_test_gh19792 arginfo_zend_trigger_bailout
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_handle_post_data, 0, 0, 3)
+	ZEND_ARG_INFO(0, stream)
+	ZEND_ARG_INFO(0, content_type)
+	ZEND_ARG_INFO(0, content_length)
+ZEND_END_ARG_INFO()
+
+#define arginfo_zend_new_singleton_array arginfo_zend_trigger_bailout
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_set_local_var, 0, 0, 2)
+	ZEND_ARG_INFO(0, name)
+	ZEND_ARG_INFO(0, value)
+ZEND_END_ARG_INFO()
+
 #define arginfo_ZendTestNS2_namespaced_func arginfo_zend_trigger_bailout
 
 #define arginfo_ZendTestNS2_namespaced_deprecated_func arginfo_zend_trigger_bailout
@@ -360,17 +399,21 @@ static ZEND_FUNCTION(zend_trigger_bailout);
 static ZEND_FUNCTION(zend_test_array_return);
 static ZEND_FUNCTION(zend_test_nullable_array_return);
 static ZEND_FUNCTION(zend_test_void_return);
+static ZEND_FUNCTION(zend_test_forward_reference);
 static ZEND_FUNCTION(zend_test_compile_string);
 static ZEND_FUNCTION(zend_test_deprecated);
 static ZEND_FUNCTION(zend_test_deprecated_attr);
 static ZEND_FUNCTION(zend_test_nodiscard);
 static ZEND_FUNCTION(zend_test_deprecated_nodiscard);
+static ZEND_FUNCTION(zend_test_child_init_count);
 static ZEND_FUNCTION(zend_create_unterminated_string);
 static ZEND_FUNCTION(zend_terminate_string);
 static ZEND_FUNCTION(zend_leak_variable);
 static ZEND_FUNCTION(zend_leak_bytes);
 static ZEND_FUNCTION(zend_delref);
 static ZEND_FUNCTION(zend_test_erealloc_block_size);
+static ZEND_FUNCTION(zend_test_serialization_bailout);
+static ZEND_FUNCTION(zend_test_serialization_state);
 static ZEND_FUNCTION(zend_bool);
 static ZEND_FUNCTION(zend_bool_or_null);
 static ZEND_FUNCTION(zend_bool_slow_zpp);
@@ -409,6 +452,8 @@ static ZEND_FUNCTION(zend_resource);
 static ZEND_FUNCTION(zend_resource_or_null);
 static ZEND_FUNCTION(zend_resource_slow_zpp);
 static ZEND_FUNCTION(zend_resource_or_null_slow_zpp);
+static ZEND_FUNCTION(zend_test_emalloc);
+static ZEND_FUNCTION(zend_test_callback);
 static ZEND_FUNCTION(zend_string_or_object);
 static ZEND_FUNCTION(zend_string_or_object_or_null);
 static ZEND_FUNCTION(zend_obj_stdclass_or_string);
@@ -427,6 +472,7 @@ static ZEND_FUNCTION(zend_test_attribute_with_named_argument);
 static ZEND_FUNCTION(zend_get_current_func_name);
 static ZEND_FUNCTION(zend_call_method);
 static ZEND_FUNCTION(zend_object_init_with_constructor);
+static ZEND_FUNCTION(zend_object_init_with_constructor_array);
 static ZEND_FUNCTION(zend_call_method_if_exists);
 static ZEND_FUNCTION(zend_test_call_with_consumed_args);
 static ZEND_FUNCTION(zend_test_refcount);
@@ -460,6 +506,9 @@ static ZEND_FUNCTION(zend_test_gh18756);
 static ZEND_FUNCTION(zend_test_opcache_preloading);
 static ZEND_FUNCTION(zend_test_uri_parser);
 static ZEND_FUNCTION(zend_test_gh19792);
+static ZEND_FUNCTION(zend_test_handle_post_data);
+static ZEND_FUNCTION(zend_new_singleton_array);
+static ZEND_FUNCTION(zend_test_set_local_var);
 static ZEND_FUNCTION(ZendTestNS2_namespaced_func);
 static ZEND_FUNCTION(ZendTestNS2_namespaced_deprecated_func);
 static ZEND_FUNCTION(ZendTestNS2_ZendSubNS_namespaced_func);
@@ -496,6 +545,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_test_array_return, arginfo_zend_test_array_return)
 	ZEND_FE(zend_test_nullable_array_return, arginfo_zend_test_nullable_array_return)
 	ZEND_FE(zend_test_void_return, arginfo_zend_test_void_return)
+	ZEND_FE(zend_test_forward_reference, arginfo_zend_test_forward_reference)
 	ZEND_FE(zend_test_compile_string, arginfo_zend_test_compile_string)
 #if (PHP_VERSION_ID >= 80400)
 	ZEND_RAW_FENTRY("zend_test_deprecated", zif_zend_test_deprecated, arginfo_zend_test_deprecated, ZEND_ACC_DEPRECATED, NULL, NULL)
@@ -505,6 +555,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_test_deprecated_attr, arginfo_zend_test_deprecated_attr)
 	ZEND_FE(zend_test_nodiscard, arginfo_zend_test_nodiscard)
 	ZEND_FE(zend_test_deprecated_nodiscard, arginfo_zend_test_deprecated_nodiscard)
+	ZEND_FE(zend_test_child_init_count, arginfo_zend_test_child_init_count)
 #if (PHP_VERSION_ID >= 80400)
 	ZEND_RAW_FENTRY("zend_test_aliased", zif_zend_test_void_return, arginfo_zend_test_aliased, 0, NULL, NULL)
 #else
@@ -521,6 +572,8 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_leak_bytes, arginfo_zend_leak_bytes)
 	ZEND_FE(zend_delref, arginfo_zend_delref)
 	ZEND_FE(zend_test_erealloc_block_size, arginfo_zend_test_erealloc_block_size)
+	ZEND_FE(zend_test_serialization_bailout, arginfo_zend_test_serialization_bailout)
+	ZEND_FE(zend_test_serialization_state, arginfo_zend_test_serialization_state)
 	ZEND_FE(zend_bool, arginfo_zend_bool)
 	ZEND_FE(zend_bool_or_null, arginfo_zend_bool_or_null)
 	ZEND_FE(zend_bool_slow_zpp, arginfo_zend_bool_slow_zpp)
@@ -559,6 +612,8 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_resource_or_null, arginfo_zend_resource_or_null)
 	ZEND_FE(zend_resource_slow_zpp, arginfo_zend_resource_slow_zpp)
 	ZEND_FE(zend_resource_or_null_slow_zpp, arginfo_zend_resource_or_null_slow_zpp)
+	ZEND_FE(zend_test_emalloc, arginfo_zend_test_emalloc)
+	ZEND_FE(zend_test_callback, arginfo_zend_test_callback)
 	ZEND_FE(zend_string_or_object, arginfo_zend_string_or_object)
 	ZEND_FE(zend_string_or_object_or_null, arginfo_zend_string_or_object_or_null)
 	ZEND_FE(zend_obj_stdclass_or_string, arginfo_zend_obj_stdclass_or_string)
@@ -577,6 +632,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_get_current_func_name, arginfo_zend_get_current_func_name)
 	ZEND_FE(zend_call_method, arginfo_zend_call_method)
 	ZEND_FE(zend_object_init_with_constructor, arginfo_zend_object_init_with_constructor)
+	ZEND_FE(zend_object_init_with_constructor_array, arginfo_zend_object_init_with_constructor_array)
 	ZEND_FE(zend_call_method_if_exists, arginfo_zend_call_method_if_exists)
 	ZEND_FE(zend_test_call_with_consumed_args, arginfo_zend_test_call_with_consumed_args)
 	ZEND_FE(zend_test_refcount, arginfo_zend_test_refcount)
@@ -610,6 +666,9 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_test_opcache_preloading, arginfo_zend_test_opcache_preloading)
 	ZEND_FE(zend_test_uri_parser, arginfo_zend_test_uri_parser)
 	ZEND_FE(zend_test_gh19792, arginfo_zend_test_gh19792)
+	ZEND_FE(zend_test_handle_post_data, arginfo_zend_test_handle_post_data)
+	ZEND_FE(zend_new_singleton_array, arginfo_zend_new_singleton_array)
+	ZEND_FE(zend_test_set_local_var, arginfo_zend_test_set_local_var)
 #if (PHP_VERSION_ID >= 80400)
 	ZEND_RAW_FENTRY(ZEND_NS_NAME("ZendTestNS2", "namespaced_func"), zif_ZendTestNS2_namespaced_func, arginfo_ZendTestNS2_namespaced_func, 0, NULL, NULL)
 #else

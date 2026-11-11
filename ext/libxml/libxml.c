@@ -689,6 +689,10 @@ static void php_libxml_internal_error_handler_ex(php_libxml_error_level error_ty
 {
 	char *buf;
 	bool output = false;
+	
+	if (ZEND_HAS_OOM()) {
+		return;
+	}
 
 	size_t len = vspprintf(&buf, 0, msg, ap);
 	size_t len_iter = len;
@@ -1137,6 +1141,9 @@ PHP_FUNCTION(libxml_use_internal_errors)
 			zend_llist_destroy(LIBXML(error_list));
 			efree(LIBXML(error_list));
 			LIBXML(error_list) = NULL;
+			/* libxml_get_last_error() falls back to libxml's own last error
+			 * once the list is gone, so it must not outlive the cleared list. */
+			xmlResetLastError();
 		}
 	} else {
 		xmlSetStructuredErrorFunc(NULL, php_libxml_structured_error_handler);
@@ -1195,10 +1202,10 @@ PHP_FUNCTION(libxml_get_errors)
 	ZEND_PARSE_PARAMETERS_NONE();
 
 	if (LIBXML(error_list)) {
-		array_init(return_value);
+		array_init_size(return_value, zend_llist_count(LIBXML(error_list)));
 		xmlErrorPtr error = zend_llist_get_first(LIBXML(error_list));
 
-		while (error != NULL) {
+		while (error != NULL && !ZEND_HAS_OOM()) {
 			zval z_error;
 			php_libxml_create_error_object(&z_error, error);
 			add_next_index_zval(return_value, &z_error);

@@ -119,7 +119,9 @@ zend_accel_shared_globals *accel_shared_globals = NULL;
 char accel_uname_id[32];
 #endif
 bool accel_startup_ok = false;
+#ifdef __DEBUG_MESSAGES__
 static const char *zps_failure_reason = NULL;
+#endif
 const char *zps_api_failure_reason = NULL;
 bool file_cache_only = false;  /* process uses file cache only */
 #if ENABLE_FILE_CACHE_FALLBACK
@@ -457,8 +459,9 @@ static void accel_interned_strings_restore_state(void)
 				/* Discard non-global CE_CACHE slots on reset. */
 				uintptr_t idx = (GC_REFCOUNT(s) - 1) / sizeof(void *);
 				if (idx >= ZCSG(map_ptr_last)) {
-					GC_SET_REFCOUNT(s, 2);
 					GC_DEL_FLAGS(s, IS_STR_CLASS_NAME_MAP_PTR);
+					atomic_thread_fence(memory_order_release);
+					GC_SET_REFCOUNT(s, 2);
 				}
 			}
 
@@ -567,6 +570,7 @@ finish:
 	if (ZSTR_HAS_CE_CACHE(str) && !ZSTR_HAS_CE_CACHE(s)) {
 		ZEND_ASSERT(GC_FLAGS(str) & IS_STR_PERMANENT);
 		GC_SET_REFCOUNT(s, GC_REFCOUNT(str));
+		atomic_thread_fence(memory_order_release);
 		GC_ADD_FLAGS(s, IS_STR_CLASS_NAME_MAP_PTR);
 	}
 
@@ -585,6 +589,13 @@ static zend_string* ZEND_FASTCALL accel_new_interned_string_for_php(zend_string 
 			return ret;
 		}
 	}
+#if ZEND_RC_DEBUG
+	/* PHP shouldn't create persistent strings during request, but at least
+	 * dl() may do this. They belong to the temporary module and are not shared. */
+	if (!zend_rc_debug && !ZSTR_IS_INTERNED(str) && (GC_FLAGS(str) & GC_PERSISTENT)) {
+		GC_MAKE_PERSISTENT_LOCAL(str);
+	}
+#endif
 	return str;
 }
 
@@ -608,19 +619,34 @@ static zend_always_inline zend_string *accel_find_interned_string_ex(zend_ulong 
 
 static zend_string* ZEND_FASTCALL accel_init_interned_string_for_php(const char *str, size_t size, bool permanent)
 {
+	zend_string *ret;
+
 	if (ZCG(counted)) {
 	    zend_ulong h = zend_inline_hash_func(str, size);
-		zend_string *ret = accel_find_interned_string_ex(h, str, size);
+		ret = accel_find_interned_string_ex(h, str, size);
 
-		if (!ret) {
-			ret = zend_string_init(str, size, permanent);
-			ZSTR_H(ret) = h;
+		if (ret) {
+			return ret;
 		}
 
-		return ret;
+		ret = zend_string_finit(str, size, permanent, CG(interned_strings_fallible));
+		if (UNEXPECTED(!ret)) {
+			return NULL;
+		}
+		ZSTR_H(ret) = h;
+	} else {
+		ret = zend_string_finit(str, size, permanent, CG(interned_strings_fallible));
 	}
 
-	return zend_string_init(str, size, permanent);
+#if ZEND_RC_DEBUG
+	/* PHP shouldn't create persistent strings during request, but at least
+	 * dl() may do this. They belong to the temporary module and are not shared. */
+	if (!zend_rc_debug && permanent) {
+		GC_MAKE_PERSISTENT_LOCAL(ret);
+	}
+#endif
+
+	return ret;
 }
 
 static inline void accel_copy_permanent_list_types(
@@ -1517,10 +1543,10 @@ static void zend_accel_add_key(zend_string *key, zend_accel_hash_entry *bucket)
 	}
 }
 
+/* Must perform the same check as phar_compile_file(). */
 static zend_always_inline bool is_phar_file(const zend_string *filename)
 {
-	return filename &&
-		zend_string_ends_with_literal(filename, ".phar") &&
+	return filename && strstr(ZSTR_VAL(filename), ".phar") &&
 		!strstr(ZSTR_VAL(filename), "://");
 }
 
@@ -2089,6 +2115,7 @@ const zend_op_array *zend_accel_pfa_cache_get(
 zend_op_array *zend_accel_compile_pfa(zend_ast *ast,
 		zend_string *declaring_filename,
 		const uint32_t *declaring_lineno_ptr,
+		const zend_op_array *declaring_op_array,
 		const zend_function *called_function,
 		zend_string *pfa_func_name, bool cacheable_in_shm)
 {
@@ -2145,21 +2172,33 @@ zend_op_array *zend_accel_compile_pfa(zend_ast *ast,
 		destroy_op_array(script_op_array);
 		efree(script_op_array);
 
+		const zend_op_array *retained[2];
+		uint32_t num_retained = 0;
 		if ((called_function->common.fn_flags & ZEND_ACC_CLOSURE)
 				&& called_function->type == ZEND_USER_FUNCTION
 				&& called_function->op_array.refcount) {
 			/* Extend the lifetime of the called opcodes if
 			 * the called function is a closure.
 			 * See comment in zend_accel_pfa_key(). */
-			zend_op_array *copy = zend_arena_alloc(&CG(arena), sizeof(*copy));
-			memcpy(copy, called_function, sizeof(*copy));
-			function_add_ref((zend_function *) copy);
-			/* Reference the copy in op_array->dynamic_func_defs so that it's
-			 * destroyed when op_array is destroyed. */
+			retained[num_retained++] = &called_function->op_array;
+		}
+		if (declaring_op_array && declaring_op_array->refcount) {
+			/* The key contains a declaring opline address, which eval() code may free and reuse. */
+			retained[num_retained++] = declaring_op_array;
+		}
+		if (num_retained) {
+			/* Copies in dynamic_func_defs are released with op_array. */
 			ZEND_ASSERT(!op_array->dynamic_func_defs && !op_array->num_dynamic_func_defs);
-			op_array->dynamic_func_defs = safe_emalloc(1, sizeof(*op_array->dynamic_func_defs), 0);
-			op_array->dynamic_func_defs[0] = copy;
-			op_array->num_dynamic_func_defs = 1;
+			op_array->dynamic_func_defs = safe_emalloc(num_retained, sizeof(*op_array->dynamic_func_defs), 0);
+			for (uint32_t i = 0; i < num_retained; i++) {
+				zend_op_array *copy = zend_arena_alloc(&CG(arena), sizeof(*copy));
+				memcpy(copy, retained[i], sizeof(*copy));
+				/* function_add_ref() ignores ZEND_EVAL_CODE */
+				copy->type = ZEND_USER_FUNCTION;
+				function_add_ref((zend_function *) copy);
+				op_array->dynamic_func_defs[i] = copy;
+			}
+			op_array->num_dynamic_func_defs = num_retained;
 		}
 
 		zend_hash_add_new_ptr(&EG(partial_function_application_cache), key, op_array);
@@ -2647,6 +2686,7 @@ static zend_class_entry* zend_accel_inheritance_cache_add(zend_class_entry *ce, 
 	}
 
 	zend_map_ptr_extend(ZCSG(map_ptr_last));
+	zend_accel_pending_ce_cache_begin();
 
 #if ZEND_MM_NEED_EIGHT_BYTE_REALIGNMENT
 	/* Align to 8-byte boundary */
@@ -2704,6 +2744,8 @@ static zend_class_entry* zend_accel_inheritance_cache_add(zend_class_entry *ce, 
 	ZCSG(map_ptr_last) = CG(map_ptr_last);
 	atomic_thread_fence(memory_order_release);
 	proto->inheritance_cache = entry;
+
+	zend_accel_pending_ce_cache_commit();
 
 	zend_shared_alloc_destroy_xlat_table();
 
@@ -3029,6 +3071,9 @@ zend_result accel_post_deactivate(void)
 		ZCG(cwd) = NULL;
 	}
 
+	/* A persist window left through a bailout never published its slots */
+	zend_accel_pending_ce_cache_discard();
+
 	if (!ZCG(enabled) || !accel_startup_ok) {
 		return SUCCESS;
 	}
@@ -3066,7 +3111,9 @@ static int accelerator_remove_cb(zend_extension *element1, zend_extension *eleme
 static void zps_startup_failure(const char *reason, const char *api_reason, int (*cb)(zend_extension *, zend_extension *))
 {
 	accel_startup_ok = false;
+#ifdef __DEBUG_MESSAGES__
 	zps_failure_reason = reason;
+#endif
 	zps_api_failure_reason = api_reason?api_reason:reason;
 	zend_llist_del_element(&zend_extensions, NULL, (int (*)(void *, void *))cb);
 }
@@ -3693,6 +3740,11 @@ static void (*orig_post_shutdown_cb)(void);
 
 static void accel_post_shutdown(void)
 {
+	/* Call original shutdown prior to detaching SHM, so it can access its memory safely. */
+	if (orig_post_shutdown_cb) {
+		orig_post_shutdown_cb();
+	}
+
 	zend_shared_alloc_shutdown();
 }
 
@@ -5051,6 +5103,9 @@ static zend_result accel_preload(const char *config, bool in_child)
 
 		zend_shared_alloc_save_state();
 		accel_interned_strings_save_state();
+#ifdef HAVE_JIT
+		zend_jit_save_restart_point();
+#endif
 
 		SHM_PROTECT();
 		HANDLE_UNBLOCK_INTERRUPTIONS();
@@ -5133,6 +5188,7 @@ static zend_result accel_finish_startup_preload(bool in_child)
 	EG(error_reporting) = 0;
 
 	const zend_result rc = php_request_startup();
+	zend_mm_set_max_allocs(0);
 
 	EG(error_reporting) = orig_error_reporting;
 

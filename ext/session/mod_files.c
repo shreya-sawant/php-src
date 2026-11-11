@@ -149,7 +149,7 @@ static void ps_files_close(ps_files *data)
 static void ps_files_open(ps_files *data, /* const */ zend_string *key)
 {
 	char buf[MAXPATHLEN];
-#if !defined(O_NOFOLLOW) || !defined(PHP_WIN32)
+#ifndef PHP_WIN32
 	struct stat sbuf = {0};
 #endif
 	int ret;
@@ -162,7 +162,7 @@ static void ps_files_open(ps_files *data, /* const */ zend_string *key)
 
 		ps_files_close(data);
 
-		if (php_session_valid_key(ZSTR_VAL(key)) == FAILURE) {
+		if (php_session_valid_key_ex(key) == FAILURE) {
 			php_error_docref(NULL, E_WARNING, "Session ID is too long or contains illegal characters. Only the A-Z, a-z, 0-9, \"-\", and \",\" characters are allowed");
 			return;
 		}
@@ -175,16 +175,11 @@ static void ps_files_open(ps_files *data, /* const */ zend_string *key)
 		data->last_key = zend_string_copy(key);
 
 		/* O_NOFOLLOW to prevent us from following evil symlinks */
-#ifdef O_NOFOLLOW
-		data->fd = VCWD_OPEN_MODE(buf, O_CREAT | O_RDWR | O_BINARY | O_NOFOLLOW, data->filemode);
-#else
-		/* Check to make sure that the opened file is not outside of allowable dirs.
-		   This is not 100% safe but it's hard to do something better without O_NOFOLLOW */
-		if (PG(open_basedir) && lstat(buf, &sbuf) == 0 && S_ISLNK(sbuf.st_mode) && php_check_open_basedir(buf)) {
-			return;
-		}
-		data->fd = VCWD_OPEN_MODE(buf, O_CREAT | O_RDWR | O_BINARY, data->filemode);
+		int flags = O_CREAT | O_RDWR | O_BINARY | O_NOFOLLOW;
+#ifdef O_CLOEXEC
+		flags |= O_CLOEXEC;
 #endif
+		data->fd = VCWD_OPEN_MODE(buf, flags, data->filemode);
 
 		if (data->fd != -1) {
 #ifndef PHP_WIN32
@@ -207,7 +202,7 @@ static void ps_files_open(ps_files *data, /* const */ zend_string *key)
 				ret = flock(data->fd, LOCK_EX);
 			} while (ret == -1 && errno == EINTR);
 
-#ifdef F_SETFD
+#if defined(F_SETFD) && !defined(O_CLOEXEC)
 # ifndef FD_CLOEXEC
 #  define FD_CLOEXEC 1
 # endif
@@ -231,11 +226,6 @@ static zend_result ps_files_write(ps_files *data, zend_string *key, zend_string 
 	ps_files_open(data, key);
 	if (data->fd < 0) {
 		return FAILURE;
-	}
-
-	/* Truncate file if the amount of new data is smaller than the existing data set. */
-	if (ZSTR_LEN(val) < data->st_size) {
-		php_ignore_value(ftruncate(data->fd, 0));
 	}
 
 #ifdef HAVE_PWRITE
@@ -270,6 +260,12 @@ static zend_result ps_files_write(ps_files *data, zend_string *key, zend_string 
 		}
 		return FAILURE;
 	}
+
+	if (ZSTR_LEN(val) < data->st_size) {
+		php_ignore_value(ftruncate(data->fd, ZSTR_LEN(val)));
+	}
+
+	data->st_size = ZSTR_LEN(val);
 
 	return SUCCESS;
 }

@@ -58,6 +58,8 @@ extern "C++" {
 /* Make the atomic types used by Zend available to C++ extensions. */
 using std::atomic_bool;
 using std::atomic_int;
+using std::atomic_thread_fence;
+using std::memory_order_acquire;
 }
 #else
 # if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 201112L
@@ -308,7 +310,9 @@ char *alloca();
 # define ZEND_ATTRIBUTE_PTR_FORMAT(type, idx, first)
 #endif
 
-#if ZEND_GCC_VERSION >= 3001 || __has_attribute(deprecated)
+#if __STDC_VERSION__ >= 202311L || (defined(__cplusplus) && __cplusplus >= 201402L)
+# define ZEND_ATTRIBUTE_DEPRECATED [[deprecated]]
+#elif ZEND_GCC_VERSION >= 3001 || __has_attribute(deprecated)
 # define ZEND_ATTRIBUTE_DEPRECATED  __attribute__((deprecated))
 #elif defined(ZEND_WIN32)
 # define ZEND_ATTRIBUTE_DEPRECATED  __declspec(deprecated)
@@ -400,6 +404,12 @@ char *alloca();
 #define ZEND_ELEMENT_COUNT(m)
 #endif
 
+#if __STDC_VERSION__ >= 202311L
+# define ZEND_TYPEOF(x) typeof(x)
+#elif ZEND_GCC_VERSION
+# define ZEND_TYPEOF(x) __typeof__(x)
+#endif
+
 #if __cplusplus
 extern "C++" {
 # include <cstddef>
@@ -414,13 +424,12 @@ extern "C++" {
 
 # define ZEND_CONTAINER_OF(ptr, Type, member) zend_container_of<Type, decltype(Type::member)>(ptr, offsetof(Type, member))
 }
-#elif __STDC_VERSION__ >= 202311L || ZEND_GCC_VERSION
-/* typeof is C23 or a GCC extension */
+#elif defined(ZEND_TYPEOF)
 # define ZEND_CONTAINER_OF(ptr, Type, member) \
 	_Generic( \
 		(ptr), \
-		const typeof(((Type*)0)->member) *: ((const Type*)((char*)(ptr) - offsetof(Type, member))), \
-		typeof(((Type*)0)->member) *: ((Type*)((char*)(ptr) - offsetof(Type, member))) \
+		const ZEND_TYPEOF(((Type*)0)->member) *: ((const Type*)((char*)(ptr) - offsetof(Type, member))), \
+		ZEND_TYPEOF(((Type*)0)->member) *: ((Type*)((char*)(ptr) - offsetof(Type, member))) \
 	)
 #else
 /* Define a variant that does not keep const-ness for older compilers. Mismatches
@@ -555,8 +564,6 @@ extern "C++" {
 #define ZEND_STRS(str)		(str), (sizeof(str))
 #define ZEND_NORMALIZE_BOOL(n)			\
 	((n) ? (((n)<0) ? -1 : 1) : 0)
-#define ZEND_TRUTH(x)		((x) ? 1 : 0)
-#define ZEND_LOG_XOR(a, b)		(ZEND_TRUTH(a) ^ ZEND_TRUTH(b))
 
 /**
  * Do a three-way comparison of two integers and returns -1, 0 or 1

@@ -212,7 +212,7 @@ static zend_result phar_tar_process_metadata(phar_entry_info *entry, php_stream 
 	size_t save = php_stream_tell(fp), read;
 	phar_entry_info *mentry;
 
-	metadata = (char *) safe_emalloc(1, entry->uncompressed_filesize, 1);
+	metadata = (char *) safe_emalloc(entry->uncompressed_filesize, sizeof(char), 1);
 
 	read = php_stream_read(fp, metadata, entry->uncompressed_filesize);
 	if (read != entry->uncompressed_filesize) {
@@ -441,8 +441,10 @@ bail:
 			last_was_longlink = true;
 			/* support the ././@LongLink system for storing long filenames */
 
-			/* Check for overflow - bug 61065 */
-			if (entry.uncompressed_filesize == 0 || entry.uncompressed_filesize > totalsize) {
+			/* Check for empty, truncated, or excessively large ././@LongLink filename entries - bug 61065 */
+			if (entry.uncompressed_filesize == 0
+					|| entry.uncompressed_filesize > totalsize
+					|| entry.uncompressed_filesize > UINT16_MAX) {
 				if (error) {
 					spprintf(error, 4096, "phar error: \"%s\" is a corrupted tar file (invalid entry size)", fname);
 				}
@@ -602,7 +604,7 @@ bail:
 		}
 
 		if (zend_string_starts_with_literal(entry.filename, ".phar/.metadata")) {
-			if (FAILURE == phar_tar_process_metadata(newentry, fp)) {
+			if (size > totalsize || FAILURE == phar_tar_process_metadata(newentry, fp)) {
 				if (error) {
 					spprintf(error, 4096, "phar error: tar-based phar \"%s\" has invalid metadata in magic file \"%s\"", fname, ZSTR_VAL(entry.filename));
 				}
@@ -1316,7 +1318,7 @@ nostub:
 	} /* signature */
 
 	/* add final zero blocks */
-	buf = (char *) ecalloc(1024, 1);
+	buf = (char *) ecalloc(1024, sizeof(char));
 	php_stream_write(newfile, buf, 1024);
 	efree(buf);
 

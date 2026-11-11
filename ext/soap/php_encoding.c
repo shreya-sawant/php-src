@@ -442,11 +442,7 @@ static xmlNodePtr master_to_xml_int(encodePtr encode, zval *data, int style, xml
 
 			ZEND_HASH_FOREACH_STR_KEY_VAL(SOAP_GLOBAL(class_map), type_name, tmp) {
 				ZVAL_DEREF(tmp);
-				if (Z_TYPE_P(tmp) == IS_STRING &&
-				    ZSTR_LEN(ce->name) == Z_STRLEN_P(tmp) &&
-				    zend_binary_strncasecmp(ZSTR_VAL(ce->name), ZSTR_LEN(ce->name), Z_STRVAL_P(tmp), ZSTR_LEN(ce->name), ZSTR_LEN(ce->name)) == 0 &&
-				    type_name) {
-
+				if (Z_TYPE_P(tmp) == IS_STRING && type_name && zend_string_equals_ci(ce->name, Z_STR_P(tmp))) {
 					/* TODO: namespace isn't stored */
 					encodePtr enc = NULL;
 					if (SOAP_GLOBAL(sdl)) {
@@ -988,7 +984,7 @@ static xmlNodePtr to_xml_hexbin(encodeTypePtr type, zval *data, int style, xmlNo
 		ZVAL_STR(&tmp, get_serialization_string_from_zval(data));
 		data = &tmp;
 	}
-	str = (unsigned char *) safe_emalloc(Z_STRLEN_P(data), 2, 1);
+	str = (unsigned char *) safe_emalloc(Z_STRLEN_P(data) * 2, sizeof(unsigned char), 1);
 
 	for (i = j = 0; i < Z_STRLEN_P(data); i++) {
 		str[j++] = hexconvtab[((unsigned char)Z_STRVAL_P(data)[i]) >> 4];
@@ -2080,7 +2076,7 @@ static int* get_position_12(int dimension, const char* str)
 	int *pos;
 	int i = -1, flag = 0;
 
-	pos = safe_emalloc(sizeof(int), dimension, 0);
+	pos = safe_emalloc(dimension, sizeof(int), 0);
 	memset(pos,0,sizeof(int)*dimension);
 	while (*str != '\0' && (*str < '0' || *str > '9') && (*str != '*')) {
 		str++;
@@ -2137,7 +2133,7 @@ static int* get_position(int dimension, const char* str)
 {
 	int *pos;
 
-	pos = safe_emalloc(sizeof(int), dimension, 0);
+	pos = safe_emalloc(dimension, sizeof(int), 0);
 	get_position_ex(dimension, str, &pos);
 	return pos;
 }
@@ -2359,7 +2355,7 @@ iterator_failed_to_get:
 				smart_str_appends(&array_type, value);
 			}
 
-			dims = safe_emalloc(sizeof(int), dimension, 0);
+			dims = safe_emalloc(dimension, sizeof(int), 0);
 			dims[0] = i;
 			el = data;
 			for (i = 1; i < dimension; i++) {
@@ -2454,13 +2450,13 @@ iterator_failed_to_get:
 
 			smart_str_append_long(&array_size, i);
 
-			dims = safe_emalloc(sizeof(int), dimension, 0);
+			dims = safe_emalloc(dimension, sizeof(int), 0);
 			dims[0] = i;
 		} else {
 
 			enc = get_array_type(xmlParam, data, &array_type);
 			smart_str_append_long(&array_size, i);
-			dims = safe_emalloc(sizeof(int), dimension, 0);
+			dims = safe_emalloc(dimension, sizeof(int), 0);
 			dims[0] = i;
 		}
 
@@ -2664,7 +2660,7 @@ static zval *to_zval_array(zval *ret, encodeTypePtr type, xmlNodePtr data)
 		dims = emalloc(sizeof(int));
 		*dims = 0;
 	}
-	pos = safe_emalloc(sizeof(int), dimension, 0);
+	pos = safe_emalloc(dimension, sizeof(int), 0);
 	memset(pos,0,sizeof(int)*dimension);
 	if (data &&
 	    (attr = get_soap_enc_attribute(data->properties,"offset")) &&
@@ -2708,6 +2704,11 @@ static zval *to_zval_array(zval *ret, encodeTypePtr type, xmlNodePtr data)
 					ar = zend_hash_index_update(Z_ARRVAL_P(ar), pos[i], &tmpAr);
 				}
 				i++;
+				if (ZEND_HAS_OOM()) {
+					zval_ptr_dtor(ret);
+					ZVAL_NULL(ret);
+					goto ret;
+				}
 			}
 			zend_hash_index_update(Z_ARRVAL_P(ar), pos[i], &tmpVal);
 
@@ -2733,6 +2734,8 @@ static zval *to_zval_array(zval *ret, encodeTypePtr type, xmlNodePtr data)
 		}
 		trav = trav->next;
 	}
+
+ret:;
 	efree(dims);
 	efree(pos);
 	return ret;
@@ -3073,6 +3076,17 @@ static zval* to_zval_list(zval *ret, encodeTypePtr enc, xmlNodePtr data) {
 	return to_zval_stringc(ret, enc, data);
 }
 
+static void to_xml_list_item_error(encodeTypePtr enc, encodePtr list_enc)
+{
+	if (enc->sdl_type && enc->sdl_type->kind == XSD_TYPEKIND_UNION) {
+		soap_error1(E_ERROR, "Encoding: Value does not match any member type of union type '%s'",
+			soap_type_name(enc));
+	} else {
+		soap_error2(E_ERROR, "Encoding: Failed to encode list item of type '%s' for list type '%s'",
+			soap_type_name(list_enc ? &list_enc->details : NULL), soap_type_name(enc));
+	}
+}
+
 static xmlNodePtr to_xml_list(encodeTypePtr enc, zval *data, int style, xmlNodePtr parent) {
 	xmlNodePtr ret;
 	encodePtr list_enc = NULL;
@@ -3108,9 +3122,7 @@ static xmlNodePtr to_xml_list(encodeTypePtr enc, zval *data, int style, xmlNodeP
 				}
 				smart_str_appends(&list, (char*)dummy->children->content);
 			} else {
-				soap_error2(E_ERROR,
-					"Encoding: Failed to encode list item of type '%s' for list type '%s'",
-					soap_type_name(&list_enc->details), soap_type_name(enc));
+				to_xml_list_item_error(enc, list_enc);
 			}
 			xmlUnlinkNode(dummy);
 			xmlFreeNode(dummy);
@@ -3152,9 +3164,7 @@ static xmlNodePtr to_xml_list(encodeTypePtr enc, zval *data, int style, xmlNodeP
 				}
 				smart_str_appends(&list, (char*)dummy->children->content);
 			} else {
-				soap_error2(E_ERROR,
-					"Encoding: Failed to encode list item of type '%s' for list type '%s'",
-					soap_type_name(&list_enc->details), soap_type_name(enc));
+				to_xml_list_item_error(enc, list_enc);
 			}
 			xmlUnlinkNode(dummy);
 			xmlFreeNode(dummy);
@@ -3233,7 +3243,7 @@ static xmlNodePtr to_xml_any(encodeTypePtr type, zval *data, int style, xmlNodeP
 
 		ZEND_HASH_FOREACH_STR_KEY_VAL(Z_ARRVAL_P(data), name, el) {
 			ret = master_to_xml(enc, el, style, parent);
-		    if (ret &&
+		    if (ret && name &&
 		        ret->name != xmlStringTextNoenc) {
 				xmlNodeSetName(ret, BAD_CAST(ZSTR_VAL(name)));
 		    }

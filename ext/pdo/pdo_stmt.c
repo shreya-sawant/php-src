@@ -260,19 +260,6 @@ static bool really_register_bound_param(struct pdo_bound_param_data *param, pdo_
 	zval *parameter;
 	struct pdo_bound_param_data *pparam = NULL;
 
-	hash = is_param ? stmt->bound_params : stmt->bound_columns;
-
-	if (!hash) {
-		ALLOC_HASHTABLE(hash);
-		zend_hash_init(hash, 13, NULL, param_dtor, 0);
-
-		if (is_param) {
-			stmt->bound_params = hash;
-		} else {
-			stmt->bound_columns = hash;
-		}
-	}
-
 	if (!Z_ISREF(param->parameter)) {
 		parameter = &param->parameter;
 	} else {
@@ -348,6 +335,17 @@ static bool really_register_bound_param(struct pdo_bound_param_data *param, pdo_
 	/* delete any other parameter registered with this number.
 	 * If the parameter is named, it will be removed and correctly
 	 * disposed of by the hash_update call that follows */
+	hash = is_param ? stmt->bound_params : stmt->bound_columns;
+	if (!hash) {
+		ALLOC_HASHTABLE(hash);
+		zend_hash_init(hash, 13, NULL, param_dtor, 0);
+		if (is_param) {
+			stmt->bound_params = hash;
+		} else {
+			stmt->bound_columns = hash;
+		}
+	}
+
 	if (param->paramno >= 0) {
 		zend_hash_index_del(hash, param->paramno);
 	}
@@ -362,7 +360,6 @@ static bool really_register_bound_param(struct pdo_bound_param_data *param, pdo_
 	/* tell the driver we just created a parameter */
 	if (stmt->methods->param_hook) {
 		if (!stmt->methods->param_hook(stmt, pparam, PDO_PARAM_EVT_ALLOC)) {
-			PDO_HANDLE_STMT_ERR();
 			/* undo storage allocation; the hash will free the parameter
 			 * name if required */
 			if (pparam->name) {
@@ -373,35 +370,13 @@ static bool really_register_bound_param(struct pdo_bound_param_data *param, pdo_
 			ZVAL_UNDEF(&param->driver_params);
 			/* param->parameter is freed by hash dtor */
 			ZVAL_UNDEF(&param->parameter);
+			PDO_HANDLE_STMT_ERR();
 			return false;
 		}
 	}
 	return true;
 }
 /* }}} */
-
-static bool pdo_stmt_do_next_rowset(pdo_stmt_t *stmt);
-
-static void pdo_stmt_invalidate_result(pdo_stmt_t *stmt)
-{
-	if (stmt->methods->cursor_closer) {
-		stmt->methods->cursor_closer(stmt);
-	} else {
-		do {
-			while (stmt->methods->fetcher(stmt, PDO_FETCH_ORI_NEXT, 0))
-				;
-			if (!stmt->methods->next_rowset) {
-				break;
-			}
-
-			if (!pdo_stmt_do_next_rowset(stmt)) {
-				break;
-			}
-		} while (1);
-	}
-
-	stmt->executed = 0;
-}
 
 /* {{{ Execute a prepared statement, optionally binding parameters */
 PHP_METHOD(PDOStatement, execute)
@@ -419,9 +394,10 @@ PHP_METHOD(PDOStatement, execute)
 		RETURN_THROWS();
 	}
 
-	if (stmt->executed) {
-		pdo_stmt_invalidate_result(stmt);
+	if (stmt->executed && stmt->methods->cursor_closer) {
+		stmt->methods->cursor_closer(stmt);
 	}
+	stmt->execute_incomplete = 1;
 	PDO_STMT_CLEAR_ERR();
 
 	if (input_params) {
@@ -456,6 +432,11 @@ PHP_METHOD(PDOStatement, execute)
 				if (!Z_ISUNDEF(param.parameter)) {
 					zval_ptr_dtor(&param.parameter);
 				}
+				if (stmt->bound_params) {
+					zend_hash_destroy(stmt->bound_params);
+					FREE_HASHTABLE(stmt->bound_params);
+					stmt->bound_params = NULL;
+				}
 				RETURN_FALSE;
 			}
 		} ZEND_HASH_FOREACH_END();
@@ -488,6 +469,7 @@ PHP_METHOD(PDOStatement, execute)
 		RETURN_FALSE;
 	}
 	if (stmt->methods->executer(stmt)) {
+		stmt->execute_incomplete = 0;
 		if (!stmt->executed) {
 			/* this is the first execute */
 
@@ -594,7 +576,7 @@ static inline void fetch_value(pdo_stmt_t *stmt, zval *dest, int colno, enum pdo
 
 static bool do_fetch_common(pdo_stmt_t *stmt, enum pdo_fetch_orientation ori, zend_long offset) /* {{{ */
 {
-	if (!stmt->executed) {
+	if (!stmt->executed || stmt->execute_incomplete) {
 		return false;
 	}
 
@@ -756,7 +738,8 @@ static bool do_fetch(pdo_stmt_t *stmt, zval *return_value, enum pdo_fetch_type h
 		case PDO_FETCH_NUM:
 		case PDO_FETCH_NAMED:
 			if (!group_key) {
-				array_init_size(return_value, stmt->column_count);
+				/* PDO::FETCH_BOTH stores every value under its name and its index */
+				array_init_size(return_value, how == PDO_FETCH_BOTH ? 2 * stmt->column_count : stmt->column_count);
 			} else {
 				array_init(return_value);
 			}
@@ -842,7 +825,7 @@ static bool do_fetch(pdo_stmt_t *stmt, zval *return_value, enum pdo_fetch_type h
 			}
 			/* There will be at most stmt->column_count parameters.
 			 * However, if we fetch a group key we will have over allocated. */
-			fetch_function_params = safe_emalloc(sizeof(zval), stmt->column_count, 0);
+			fetch_function_params = safe_emalloc(stmt->column_count, sizeof(zval), 0);
 			break;
 		default: ZEND_UNREACHABLE();
 	}
@@ -1158,12 +1141,8 @@ static bool pdo_get_fcc_from_zval(zend_fcall_info_cache *fcc, zval *callable) {
 
 	char *is_callable_error = NULL;
 	if (!zend_is_callable(callable, fcc, &is_callable_error)) {
-		if (is_callable_error) {
-			zend_type_error("%s", is_callable_error);
-			efree(is_callable_error);
-		} else {
-			zend_type_error("User-supplied function must be a valid callback");
-		}
+		zend_type_error("%s", is_callable_error);
+		efree(is_callable_error);
 		return false;
 	}
 	return true;

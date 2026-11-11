@@ -803,7 +803,7 @@ PHP_FUNCTION(unpack)
 
 
 	if (offset < 0 || offset > inputlen) {
-		zend_argument_value_error(3, "must be contained in argument #2 ($data)");
+		zend_argument_value_error(3, "must be contained in argument #2 ($string)");
 		RETURN_THROWS();
 	}
 
@@ -1036,6 +1036,11 @@ PHP_FUNCTION(unpack)
 		/* Do actual unpacking */
 		for (i = 0; i != repetitions; i++ ) {
 
+			/* Each repetition costs a name and a value, so stop once over the limit. */
+			if (ZEND_HAS_OOM()) {
+				RETURN_OOM();
+			}
+
 			if (size != 0 && size != -1 && INT_MAX - size + 1 < inputpos) {
 				php_error_docref(NULL, E_WARNING, "Type %c: integer overflow", type);
 				zend_array_destroy(Z_ARR_P(return_value));
@@ -1260,7 +1265,7 @@ PHP_FUNCTION(unpack)
 						if (type == 'l') {
 							v = (int32_t) x;
 						} else {
-							v = x;
+							v = (zend_long) x;
 						}
 
 						ZVAL_LONG(&val, v);

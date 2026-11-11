@@ -760,12 +760,14 @@ static inline zend_long safe_shift_left(zend_long n, zend_long s) {
 }
 
 static inline bool shift_left_overflows(zend_long n, zend_long s) {
-	/* This considers shifts that shift in the sign bit to be overflowing as well */
-	if (n >= 0) {
-		return s >= SIZEOF_ZEND_LONG * 8 - 1 || safe_shift_left(n, s) < n;
-	} else {
-		return s >= SIZEOF_ZEND_LONG * 8 || safe_shift_left(n, s) > n;
+	if (UNEXPECTED((zend_ulong)s >= SIZEOF_ZEND_LONG * 8)) {
+		return true;
 	}
+	if (UNEXPECTED(s == SIZEOF_ZEND_LONG * 8 - 1)) {
+		return n != 0 && n != -1;
+	}
+	zend_long shifted = (zend_long)((zend_ulong)n << (zend_ulong)s);
+	return (shifted >> s) != n;
 }
 
 /* If b does not divide a exactly, return the two adjacent values between which the real result
@@ -1445,7 +1447,9 @@ ZEND_API bool zend_inference_propagate_range(const zend_op_array *op_array, cons
 			break;
 		case ZEND_ASSIGN:
 			if (ssa_op->op1_def == var || ssa_op->op2_def == var || ssa_op->result_def == var) {
-				if (OP2_HAS_RANGE()) {
+				if (OP2_HAS_RANGE()
+				 && (ssa_op->op2_def == var
+				  || (opline->op1_type == IS_CV && !(OP1_INFO() & MAY_BE_REF)))) {
 					tmp->min = OP2_MIN_RANGE();
 					tmp->max = OP2_MAX_RANGE();
 					tmp->underflow = OP2_RANGE_UNDERFLOW();
@@ -2225,6 +2229,9 @@ static uint32_t assign_dim_array_result_type(
 			if (dim_type & (MAY_BE_UNDEF|MAY_BE_NULL)) {
 				tmp |= MAY_BE_ARRAY_KEY_STRING;
 			}
+			if ((tmp & MAY_BE_ARRAY_KEY_STRING) && MAY_BE_PACKED(arr_type)) {
+				tmp |= MAY_BE_ARRAY_NUMERIC_HASH;
+			}
 		}
 	}
 	/* Only add value type if we have a key type. It might be that the key type is illegal
@@ -2463,7 +2470,7 @@ static const zend_property_info *zend_fetch_static_prop_info(const zend_script *
 	const zend_property_info *prop_info = NULL;
 	if (opline->op1_type == IS_CONST) {
 		const zend_class_entry *ce = NULL;
-		if (opline->op2_type == IS_UNUSED) {
+		if (opline->op2_type == IS_UNUSED && !(op_array->fn_flags & ZEND_ACC_TRAIT_CLONE)) {
 			uint32_t fetch_type = opline->op2.num & ZEND_FETCH_CLASS_MASK;
 			switch (fetch_type) {
 				case ZEND_FETCH_CLASS_SELF:
@@ -3619,6 +3626,9 @@ static zend_always_inline zend_result _zend_update_type_info(
 						}
 						if (t2 & (MAY_BE_UNDEF | MAY_BE_NULL)) {
 							key_type |= MAY_BE_ARRAY_KEY_STRING;
+						}
+						if ((key_type & MAY_BE_ARRAY_KEY_STRING) && MAY_BE_PACKED(t1)) {
+							key_type |= MAY_BE_ARRAY_NUMERIC_HASH;
 						}
 					}
 				} else if (opline->opcode == ZEND_FETCH_DIM_UNSET) {
@@ -4928,6 +4938,9 @@ ZEND_API zend_result zend_ssa_inference(zend_arena **arena, const zend_op_array 
 }
 /* }}} */
 
+/* Key types whose conversion to an array offset may emit a diagnostic */
+#define MAY_BE_THROWING_KEY (MAY_BE_NULL|MAY_BE_DOUBLE|MAY_BE_ARRAY|MAY_BE_OBJECT|MAY_BE_RESOURCE)
+
 ZEND_API bool zend_may_throw_ex(const zend_op *opline, const zend_ssa_op *ssa_op, const zend_op_array *op_array, const zend_ssa *ssa, uint32_t t1, uint32_t t2)
 {
 	if (opline->op1_type == IS_CV) {
@@ -5032,7 +5045,6 @@ ZEND_API bool zend_may_throw_ex(const zend_op *opline, const zend_ssa_op *ssa_op
 		case ZEND_SWITCH_STRING:
 		case ZEND_MATCH:
 		case ZEND_ISSET_ISEMPTY_VAR:
-		case ZEND_ISSET_ISEMPTY_CV:
 		case ZEND_FUNC_NUM_ARGS:
 		case ZEND_FUNC_GET_ARGS:
 		case ZEND_COPY_TMP:
@@ -5120,7 +5132,14 @@ ZEND_API bool zend_may_throw_ex(const zend_op *opline, const zend_ssa_op *ssa_op
 		case ZEND_JMPZ_EX:
 		case ZEND_JMPNZ_EX:
 		case ZEND_JMP_SET:
-			return (t1 & MAY_BE_OBJECT);
+			/* NAN cast to bool will warn */
+			return (t1 & (MAY_BE_OBJECT|MAY_BE_DOUBLE));
+		case ZEND_ISSET_ISEMPTY_CV:
+			if (!(opline->extended_value & ZEND_ISEMPTY)) {
+				return 0;
+			}
+			/* empty() casts to bool: objects may have a cast handler, and NAN will warn */
+			return (t1 & (MAY_BE_OBJECT|MAY_BE_DOUBLE));
 		case ZEND_BOOL:
 		case ZEND_BOOL_NOT:
 			/* NAN Cast to bool will warn, but if we have a range it is fine */
@@ -5204,7 +5223,7 @@ ZEND_API bool zend_may_throw_ex(const zend_op *opline, const zend_ssa_op *ssa_op
 				return 1;
 			}
 			return (t1 & (MAY_BE_OBJECT|MAY_BE_RESOURCE|MAY_BE_TRUE|MAY_BE_FALSE|MAY_BE_STRING|MAY_BE_LONG|MAY_BE_DOUBLE)) || opline->op2_type == IS_UNUSED ||
-				(t2 & (MAY_BE_UNDEF|MAY_BE_ARRAY|MAY_BE_OBJECT|MAY_BE_RESOURCE));
+				(t2 & (MAY_BE_UNDEF|MAY_BE_THROWING_KEY));
 		case ZEND_ASSIGN_OBJ:
 			if (t1 & (MAY_BE_ANY-MAY_BE_OBJECT)) {
 				return 1;
@@ -5242,7 +5261,20 @@ ZEND_API bool zend_may_throw_ex(const zend_op *opline, const zend_ssa_op *ssa_op
 					zend_hash_find_ptr(&ce->properties_info, prop_name);
 				if (prop_info) {
 					if (ZEND_TYPE_IS_SET(prop_info->type)) {
-						return 1;
+						uint32_t type_mask = ZEND_TYPE_PURE_MASK(prop_info->type);
+
+						/* The assignment can't fail if the property only accepts a single scalar type
+						 * and the value already has this type: the old value has no destructor.
+						 * If the property holds a reference, all its type sources accept this type because they accept the current value. */
+						if ((prop_info->flags & (ZEND_ACC_READONLY|ZEND_ACC_PPP_SET_MASK))
+						 || prop_info->hooks
+						 || ZEND_TYPE_IS_COMPLEX(prop_info->type)
+						 || (type_mask & ~(MAY_BE_NULL|MAY_BE_BOOL|MAY_BE_LONG|MAY_BE_DOUBLE|MAY_BE_STRING))
+						 /* single type, this excludes bool too as a reference can exist to true or false standalone types. */
+						 || (type_mask & (type_mask - 1))
+						 || (OP1_DATA_INFO() & (MAY_BE_ANY|MAY_BE_UNDEF|MAY_BE_REF)) != type_mask) {
+							return 1;
+						}
 					}
 					return !(prop_info->flags & ZEND_ACC_PUBLIC)
 						&& prop_info->ce != op_array->scope;
@@ -5256,9 +5288,9 @@ ZEND_API bool zend_may_throw_ex(const zend_op *opline, const zend_ssa_op *ssa_op
 		case ZEND_ROPE_END:
 			return t2 & (MAY_BE_ARRAY|MAY_BE_OBJECT);
 		case ZEND_INIT_ARRAY:
-			return (opline->op2_type != IS_UNUSED) && (t2 & (MAY_BE_ARRAY|MAY_BE_OBJECT|MAY_BE_RESOURCE));
+			return (opline->op2_type != IS_UNUSED) && (t2 & MAY_BE_THROWING_KEY);
 		case ZEND_ADD_ARRAY_ELEMENT:
-			return (opline->op2_type == IS_UNUSED) || (t2 & (MAY_BE_NULL|MAY_BE_ARRAY|MAY_BE_OBJECT|MAY_BE_RESOURCE));
+			return (opline->op2_type == IS_UNUSED) || (t2 & MAY_BE_THROWING_KEY);
 		case ZEND_STRLEN:
 			return (t1 & MAY_BE_ANY) != MAY_BE_STRING;
 		case ZEND_COUNT:
@@ -5285,9 +5317,11 @@ ZEND_API bool zend_may_throw_ex(const zend_op *opline, const zend_ssa_op *ssa_op
 		case ZEND_FETCH_IS:
 			return (t2 & (MAY_BE_ARRAY|MAY_BE_OBJECT));
 		case ZEND_ISSET_ISEMPTY_DIM_OBJ:
-			return (t1 & MAY_BE_OBJECT) || (t2 & (MAY_BE_DOUBLE|MAY_BE_ARRAY|MAY_BE_OBJECT));
+			return (t1 & MAY_BE_OBJECT) || (t2 & MAY_BE_THROWING_KEY);
 		case ZEND_FETCH_DIM_IS:
-			return (t1 & MAY_BE_OBJECT) || (t2 & (MAY_BE_DOUBLE|MAY_BE_ARRAY|MAY_BE_OBJECT|MAY_BE_RESOURCE));
+			return (t1 & MAY_BE_OBJECT) || (t2 & MAY_BE_THROWING_KEY)
+				/* "Illegal string offset" warning for leading-numeric string offsets */
+				|| ((t1 & MAY_BE_STRING) && (t2 & MAY_BE_STRING));
 		case ZEND_CAST:
 			switch (opline->extended_value) {
 				case IS_LONG:
@@ -5309,7 +5343,7 @@ ZEND_API bool zend_may_throw_ex(const zend_op *opline, const zend_ssa_op *ssa_op
 			if ((t2 & MAY_BE_ANY) != MAY_BE_ARRAY) {
 				return 1;
 			}
-			if ((t1 & (MAY_BE_ARRAY|MAY_BE_OBJECT|MAY_BE_RESOURCE))) {
+			if (t1 & MAY_BE_THROWING_KEY) {
 				return 1;
 			}
 			return 0;
@@ -5334,7 +5368,7 @@ ZEND_API bool zend_may_throw_ex(const zend_op *opline, const zend_ssa_op *ssa_op
 			if (t1 & (MAY_BE_FALSE|MAY_BE_TRUE|MAY_BE_LONG|MAY_BE_DOUBLE|MAY_BE_STRING|MAY_BE_OBJECT|MAY_BE_RESOURCE|MAY_BE_REF)) {
 				return 1;
 			}
-			if (t2 & (MAY_BE_RESOURCE|MAY_BE_ARRAY|MAY_BE_OBJECT)) {
+			if (t2 & MAY_BE_THROWING_KEY) {
 				return 1;
 			}
 			if (opline->op2_type == IS_UNUSED) {

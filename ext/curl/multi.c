@@ -450,7 +450,7 @@ static int _php_server_push_callback(CURL *parent_ch, CURL *easy, size_t num_hea
 }
 /* }}} */
 
-static bool _php_curl_multi_setopt(php_curlm *mh, zend_long option, zval *zvalue, zval *return_value) /* {{{ */
+static bool _php_curl_multi_setopt(php_curlm *mh, zend_long option, zval *zvalue) /* {{{ */
 {
 	CURLMcode error = CURLM_OK;
 
@@ -485,9 +485,9 @@ static bool _php_curl_multi_setopt(php_curlm *mh, zend_long option, zval *zvalue
 			}
 
 			char *error_str = NULL;
-			if (UNEXPECTED(!zend_is_callable_ex(zvalue, /* object */ NULL, /* check_flags */ 0, /* callable_name */ NULL, &mh->handlers.server_push, /* error */ &error_str))) {
+			if (UNEXPECTED(!zend_is_callable(zvalue, &mh->handlers.server_push, &error_str))) {
 				if (!EG(exception)) {
-					zend_argument_type_error(2, "must be a valid callback for option CURLMOPT_PUSHFUNCTION, %s", error_str);
+					zend_argument_type_error(3, "must be a valid callback for option CURLMOPT_PUSHFUNCTION, %s", error_str);
 				}
 				efree(error_str);
 				return false;
@@ -528,7 +528,7 @@ PHP_FUNCTION(curl_multi_setopt)
 
 	mh = Z_CURL_MULTI_P(z_mh);
 
-	RETURN_BOOL(_php_curl_multi_setopt(mh, options, zvalue, return_value));
+	RETURN_BOOL(_php_curl_multi_setopt(mh, options, zvalue));
 }
 /* }}} */
 

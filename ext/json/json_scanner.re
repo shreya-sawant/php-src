@@ -278,7 +278,11 @@ std:
 			ZVAL_EMPTY_STRING(&s->value);
 			return PHP_JSON_T_ESTRING;
 		}
-		str = zend_string_alloc(len, 0);
+		str = zend_string_falloc(len, /* persistent */ false, /* fallible */ true);
+		if (UNEXPECTED(!str)) {
+			ZEND_ASSERT(ZEND_HAS_OOM());
+			return PHP_JSON_T_ERROR;
+		}
 		ZSTR_VAL(str)[len] = '\0';
 		ZVAL_STR(&s->value, str);
 		if (s->str_esc || s->utf8_invalid) {
@@ -295,7 +299,7 @@ std:
 	<STR_P1>ANY              {
 		if (s->options & (PHP_JSON_INVALID_UTF8_IGNORE | PHP_JSON_INVALID_UTF8_SUBSTITUTE)) {
 			if (s->options & PHP_JSON_INVALID_UTF8_SUBSTITUTE) {
-				if (s->utf8_invalid_count > INT_MAX - 2) {
+				if (s->utf8_invalid_count > PTRDIFF_MAX - 2) {
 					s->errcode = PHP_JSON_ERROR_UTF8;
 					return PHP_JSON_T_ERROR;
 				}

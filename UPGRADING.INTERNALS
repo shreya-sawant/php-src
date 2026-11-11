@@ -14,6 +14,14 @@ PHP 8.7 INTERNALS UPGRADE NOTES
 1. Internal API changes
 ========================
 
+- Added zend_module_entry.child_init_func, an optional void callback invoked by
+  php_child_init() in the child process after core child initialization. It runs
+  in module dependency order for started modules and may run before a request
+  starts or during an active request. Initialize it with a designated
+  initializer such as `.child_init_func = callback` after
+  STANDARD_MODULE_PROPERTIES_EX.
+- Removed the ZEND_LOG_XOR() macro.
+- Removed the ZEND_TRUTH() macro.
 - Removed zend_execute_scripts(). Manually call zend_execute_script() in a loop
   instead.
 - Removed ZEND_STATIC_ASSERT(). Use C11 static_assert() directly instead.
@@ -45,6 +53,13 @@ PHP 8.7 INTERNALS UPGRADE NOTES
 - The INIT_CLASS_ENTRY_INIT_METHODS() macro, which was previously used as
   part of handling disabled classes, was removed following the removal of
   the `disable_classes` INI setting in PHP 8.5.
+- Using zend_array_destroy() on HashTables with a custom pDestructor is not
+  allowed anymore. User-facing HashTables must have pDestructor = ZVAL_PTR_DTOR
+  or NULL, and must be freed with zend_array_destroy(). Other HashTables can be
+  freed with zend_hash_destroy() + pefree().
+- The ZTS symbols compiler_globals_offset and executor_globals_offset have been
+  removed: CG()/EG() now reach the globals through a __thread struct.
+- Removed zend_error_noreturn_unchecked().
 
 ========================
 2. Build system changes
@@ -72,9 +87,20 @@ PHP 8.7 INTERNALS UPGRADE NOTES
     mysqlnd_reverse_api_register_api() and mysqlnd_reverse_api_get_api_list()
     no longer exist.
 
+- Mysqlnd:
+  . In ZTS builds the values of MYSQLND_STATS are atomic_uint_least64_t and
+    the LOCK_access member was removed. The MYSQLND_INC_STATISTIC*() and
+    MYSQLND_DEC_STATISTIC() macros update them with relaxed atomic additions.
+  . The MYSQLND_STATS_LOCK() and MYSQLND_STATS_UNLOCK() macros were removed.
+    MYSQLND_STATS_UPDATE_VALUE() is now an expression instead of a block.
+
 - Standard:
   . php_explode() now takes a HashTable* instead of a zval* to store the
     resulting parts. It already expected the zval* to be IS_ARRAY.
+  . _php_math_basetozval() now returns zend_result instead of void. It throws
+    an exception and returns FAILURE if the input contains invalid characters
+    for the given base.
+  . php_dl() has been removed, use php_load_extension() instead.
 
 ========================
 4. OpCode changes
@@ -89,3 +115,11 @@ PHP 8.7 INTERNALS UPGRADE NOTES
   . The force_http_10 method has been removed.
   . The get_fd method has been removed.
   . The get_target_uid and get_target_gid methods have been removed.
+
+- Per-thread TSRM resources are now released best-effort at normal thread exit,
+  because native TLS resource destructors can only run on their owning thread and
+  tsrm_shutdown() cannot release them afterwards. Prefer explicitly calling ts_free_thread().
+
+- tsrm_shutdown() and the bundled library-unload hooks automatically disarm
+  thread-exit cleanup. Embedders must stop and join all PHP worker threads
+  before calling tsrm_shutdown() or unloading PHP.

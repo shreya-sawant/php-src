@@ -115,7 +115,7 @@ ZEND_API void zend_objects_destroy_object(zend_object *object)
 	zend_function *destructor = object->ce->destructor;
 
 	if (destructor) {
-		if (UNEXPECTED(zend_object_is_lazy(object))) {
+		if (UNEXPECTED(zend_object_is_lazy(object) || ZEND_HAS_OOM())) {
 			return;
 		}
 
@@ -129,17 +129,17 @@ ZEND_API void zend_objects_destroy_object(zend_object *object)
 				ZEND_ASSERT(!(destructor->common.fn_flags & ZEND_ACC_PUBLIC));
 				if (!zend_check_method_accessible(destructor, scope)) {
 					zend_throw_error(NULL,
-						"Call to %s %s::__destruct() from %s%s",
-						zend_visibility_string(destructor->common.fn_flags), ZSTR_VAL(object->ce->name),
+						"Call to %s %pS::__destruct() from %s%pS",
+						zend_visibility_string(destructor->common.fn_flags), object->ce->name,
 						scope ? "scope " : "global scope",
-						scope ? ZSTR_VAL(scope->name) : ""
+						scope ? scope->name : ZSTR_EMPTY_ALLOC()
 					);
 					return;
 				}
 			} else {
 				zend_error(E_WARNING,
-					"Call to %s %s::__destruct() from global scope during shutdown ignored",
-					zend_visibility_string(destructor->common.fn_flags), ZSTR_VAL(object->ce->name));
+					"Call to %s %pS::__destruct() from global scope during shutdown ignored",
+					zend_visibility_string(destructor->common.fn_flags), object->ce->name);
 				return;
 			}
 		}
@@ -190,6 +190,18 @@ ZEND_API zend_object* ZEND_FASTCALL zend_objects_new(zend_class_entry *ce)
 	zend_object *object = emalloc(sizeof(zend_object) + zend_object_properties_size(ce));
 
 	_zend_object_std_init(object, ce);
+	return object;
+}
+
+ZEND_API zend_object* ZEND_FASTCALL zend_objects_fnew(zend_class_entry *ce)
+{
+	zend_object *object = femalloc(sizeof(zend_object) + zend_object_properties_size(ce), /* fallible */ true);
+	if (UNEXPECTED(!object)) {
+		return NULL;
+	}
+
+	_zend_object_std_init(object, ce);
+	object->handlers = &std_object_handlers;
 	return object;
 }
 

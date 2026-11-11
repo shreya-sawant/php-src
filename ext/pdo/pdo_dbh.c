@@ -509,7 +509,7 @@ options:
 				ZVAL_DEREF(attr_value);
 
 				/* TODO: Should the constructor fail when the attribute cannot be set? */
-				pdo_dbh_attribute_set(dbh, long_key, attr_value, 3);
+				pdo_dbh_attribute_set(dbh, long_key, attr_value, 4);
 			} ZEND_HASH_FOREACH_END();
 		}
 
@@ -852,9 +852,16 @@ static bool pdo_dbh_attribute_set(pdo_dbh_t *dbh, zend_long attr, zval *value, u
 			if (!pdo_get_long_param(&lval, value)) {
 				return false;
 			}
-			/* TODO Check for valid value (NULL_NATURAL, NULL_EMPTY_STRING, NULL_TO_STRING)? */
-			dbh->oracle_nulls = lval;
-			return true;
+			switch (lval) {
+				case PDO_NULL_NATURAL:
+				case PDO_NULL_EMPTY_STRING:
+				case PDO_NULL_TO_STRING:
+					dbh->oracle_nulls = lval;
+					return true;
+				default:
+					zend_argument_value_error(value_arg_num, "PDO::ATTR_ORACLE_NULLS must be one of the PDO::NULL_* constants");
+					return false;
+			}
 
 		case PDO_ATTR_DEFAULT_FETCH_MODE:
 			if (Z_TYPE_P(value) == IS_ARRAY) {
@@ -898,7 +905,6 @@ static bool pdo_dbh_attribute_set(pdo_dbh_t *dbh, zend_long attr, zval *value, u
 				pdo_raise_impl_error(dbh, NULL, "HY000",
 					"PDO::ATTR_STATEMENT_CLASS cannot be used with persistent PDO instances"
 					);
-				PDO_HANDLE_DBH_ERR();
 				return false;
 			}
 			if (Z_TYPE_P(value) != IS_ARRAY) {
@@ -1393,7 +1399,7 @@ bool pdo_hash_methods(pdo_dbh_object_t *dbh_obj, int kind)
 		func.function_name = zend_string_init(funcs->fname, strlen(funcs->fname), dbh->is_persistent);
 		func.scope = pdo_dbh_ce;
 		func.prototype = NULL;
-		ZEND_MAP_PTR(func.run_time_cache) = rt_cache_size ? pecalloc(rt_cache_size, 1, dbh->is_persistent) : NULL;
+		ZEND_MAP_PTR(func.run_time_cache) = rt_cache_size ? pecalloc(1, rt_cache_size, dbh->is_persistent) : NULL;
 		func.T = ZEND_OBSERVER_ENABLED;
 		if (funcs->flags) {
 			func.fn_flags = funcs->flags | ZEND_ACC_NEVER_CACHE;
@@ -1598,7 +1604,7 @@ static void pdo_dbh_free_storage(zend_object *std)
 		dbh->in_txn = false;
 	}
 
-	if (dbh->is_persistent && dbh->driver_data && dbh->methods && dbh->methods->persistent_shutdown) {
+	if (dbh->is_persistent && dbh->refcount <= 2 && dbh->driver_data && dbh->methods && dbh->methods->persistent_shutdown) {
 		dbh->methods->persistent_shutdown(dbh);
 	}
 	zend_object_std_dtor(std);

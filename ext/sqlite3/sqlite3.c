@@ -60,7 +60,7 @@ static zend_always_inline void php_sqlite3_fetch_one(int n_cols, php_sqlite3_res
 
 /* {{{ PHP_INI */
 PHP_INI_BEGIN()
-	STD_PHP_INI_ENTRY("sqlite3.extension_dir",  NULL, PHP_INI_SYSTEM, OnUpdateString, extension_dir, zend_sqlite3_globals, sqlite3_globals)
+	STD_PHP_INI_ENTRY("sqlite3.extension_dir",  NULL, PHP_INI_SYSTEM, OnUpdateStr, extension_dir, zend_sqlite3_globals, sqlite3_globals)
 #if SQLITE_VERSION_NUMBER >= 3026000
 	STD_PHP_INI_BOOLEAN("sqlite3.defensive",  "1", PHP_INI_USER, OnUpdateBool, dbconfig_defensive, zend_sqlite3_globals, sqlite3_globals)
 #endif
@@ -415,8 +415,8 @@ PHP_METHOD(SQLite3, loadExtension)
 		RETURN_THROWS();
 	}
 
-	extension_dir = SQLITE3G(extension_dir);
-	extension_dir_len = strlen(SQLITE3G(extension_dir));
+	extension_dir = ZSTR_VAL(SQLITE3G(extension_dir));
+	extension_dir_len = ZSTR_LEN(SQLITE3G(extension_dir));
 
 	if (IS_SLASH(extension_dir[extension_dir_len-1])) {
 		spprintf(&lib_path, 0, "%s%s", extension_dir, extension);
@@ -615,7 +615,7 @@ static void sqlite_value_to_zval(php_sqlite3_db_object *db_obj, sqlite3_stmt *st
 	switch (sqlite3_column_type(stmt, column)) {
 		case SQLITE_INTEGER:
 			val = sqlite3_column_int64(stmt, column);
-#if LONG_MAX <= 2147483647
+#ifndef ZEND_ENABLE_ZVAL_LONG64
 			if (val > ZEND_LONG_MAX || val < ZEND_LONG_MIN) {
 				const char *text = (const char *) sqlite3_column_text(stmt, column);
 				if (UNEXPECTED(text == NULL)) {
@@ -627,7 +627,7 @@ static void sqlite_value_to_zval(php_sqlite3_db_object *db_obj, sqlite3_stmt *st
 			} else {
 #endif
 				ZVAL_LONG(data, (zend_long) val);
-#if LONG_MAX <= 2147483647
+#ifndef ZEND_ENABLE_ZVAL_LONG64
 			}
 #endif
 			break;
@@ -789,7 +789,7 @@ static int sqlite3_do_callback(zend_fcall_info_cache *fcc, uint32_t argc, sqlite
 	for (i = 0; i < argc; i++) {
 		switch (sqlite3_value_type(argv[i])) {
 			case SQLITE_INTEGER:
-#if ZEND_LONG_MAX > 2147483647
+#ifdef ZEND_ENABLE_ZVAL_LONG64
 				ZVAL_LONG(&zargs[i + is_agg], sqlite3_value_int64(argv[i]));
 #else
 				ZVAL_LONG(&zargs[i + is_agg], sqlite3_value_int(argv[i]));
@@ -840,7 +840,7 @@ static int sqlite3_do_callback(zend_fcall_info_cache *fcc, uint32_t argc, sqlite
 		if (!Z_ISUNDEF(retval)) {
 			switch (Z_TYPE(retval)) {
 				case IS_LONG:
-#if ZEND_LONG_MAX > 2147483647
+#ifdef ZEND_ENABLE_ZVAL_LONG64
 					sqlite3_result_int64(context, Z_LVAL(retval));
 #else
 					sqlite3_result_int(context, Z_LVAL(retval));
@@ -1632,7 +1632,7 @@ static int php_sqlite3_bind_params(php_sqlite3_stmt *stmt_obj) /* {{{ */
 			switch (param->type) {
 				case SQLITE_INTEGER:
 					convert_to_long(parameter);
-#if ZEND_LONG_MAX > 2147483647
+#ifdef ZEND_ENABLE_ZVAL_LONG64
 					return_code = sqlite3_bind_int64(stmt_obj->stmt, param->param_number, Z_LVAL_P(parameter));
 #else
 					return_code = sqlite3_bind_int(stmt_obj->stmt, param->param_number, Z_LVAL_P(parameter));

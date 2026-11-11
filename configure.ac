@@ -276,6 +276,9 @@ SAPI_SHARED=libs/$SAPI_LIBNAME_SHARED
 SAPI_STATIC=libs/$SAPI_LIBNAME_STATIC
 SAPI_LIBTOOL=libphp.la
 
+dnl Set by SAPIs whose host program dlopen()s libphp without linking against it.
+php_tsrm_dlopened_sapi=no
+
 PHP_CONFIGURE_PART([Configuring SAPI modules])
 
 esyscmd(./build/config-stubs sapi)
@@ -489,19 +492,6 @@ dnl Check AVX512
 PHP_CHECK_AVX512_SUPPORTS
 dnl Check AVX512 VBMI
 PHP_CHECK_AVX512_VBMI_SUPPORTS
-
-dnl Check for __alignof__ support in the compiler
-AC_CACHE_CHECK([whether the compiler supports __alignof__],
-[php_cv_have_alignof],
-[AC_COMPILE_IFELSE([AC_LANG_PROGRAM([], [
-  int align = __alignof__(int);
-  (void)align;
-])],
-[php_cv_have_alignof=yes],
-[php_cv_have_alignof=no])])
-AS_VAR_IF([php_cv_have_alignof], [yes],
-  [AC_DEFINE([HAVE_ALIGNOF], [1],
-    [Define to 1 if the compiler supports '__alignof__'.])])
 
 dnl Check for structure members.
 AC_CHECK_MEMBERS([struct tm.tm_gmtoff],,,[#include <time.h>])
@@ -875,6 +865,20 @@ AS_VAR_IF([PHP_THREAD_SAFETY], [yes], [
 
   AC_MSG_CHECKING([for POSIX threads])
   AC_MSG_RESULT([yes])
+
+  AS_VAR_IF([php_tsrm_dlopened_sapi], [yes], [
+    php_tsrm_tls_model=
+    for flag in $CFLAGS $EXTRA_CFLAGS; do
+      AS_CASE([$flag], [-ftls-model=*], [php_tsrm_tls_model=$flag])
+    done
+
+    dnl Define TSRM_TLS_MODEL_USE_DEFAULT to avoid forcing static TLS in dlopened SAPIs.
+    dnl Omit it for explicit initial-exec to enable the TCB offset fast path.
+    AS_IF([test "$php_tsrm_tls_model" != "-ftls-model=initial-exec"], [
+      AC_DEFINE([TSRM_TLS_MODEL_USE_DEFAULT], [1],
+        [Define to 1 to use the compiler's default TLS model.])
+    ])
+  ])
 ])
 
 PHP_ARG_ENABLE([rtld-now],
@@ -1641,7 +1645,12 @@ PHP_INSTALL_HEADERS([Zend/Optimizer], m4_normalize([
   zend_worklist.h
 ]))
 
-PHP_ADD_SOURCES([TSRM], [TSRM.c], [-DZEND_ENABLE_STATIC_TSRMLS_CACHE=1])
+PHP_ADD_SOURCES([TSRM], m4_normalize([
+    TSRM.c
+    TSRM_atexit_win.c
+    TSRM_atexit_darwin.c
+    TSRM_atexit_posix.c
+  ]), [-DZEND_ENABLE_STATIC_TSRMLS_CACHE=1])
 
 PHP_ADD_SOURCES([main], m4_normalize([
     explicit_bzero.c

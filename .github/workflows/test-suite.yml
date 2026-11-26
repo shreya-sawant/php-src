@@ -265,10 +265,17 @@ jobs:
           echo "::endgroup::"
       - name: Setup Caddy server
         uses: ./.github/actions/setup-caddy-s390x
+      # hendrikmuhs/ccache-action (used by ./.github/actions/ccache) fails on s390x
+      # with "Unsupported architecture", so use the distro ccache (installed by
+      # apt-s390x) and no GitHub cache.
+      # The job-level CCACHE_* env above is not expanded ($RUNNER_TEMP stays a
+      # literal string), so set the real paths here.
       - name: ccache
-        uses: ./.github/actions/ccache
-        with:
-          name: "LINUX_S390X${{ matrix.name }}_${{ matrix.debug && 'DEBUG' || 'RELEASE' }}_${{ matrix.zts && 'ZTS' || 'NTS' }}"
+        run: |
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_CONFIGPATH=$RUNNER_TEMP/ccache.conf" >> "$GITHUB_ENV"
+          echo "CC=ccache gcc" >> "$GITHUB_ENV"
+          echo "CXX=ccache g++" >> "$GITHUB_ENV"
       - name: ./configure
         uses: ./.github/actions/configure-s390x
         with:

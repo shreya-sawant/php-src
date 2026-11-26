@@ -24,6 +24,7 @@ runs:
         sudo apt-get install -y \
           autoconf \
           gcc \
+          ccache \
           make \
           curl \
           unzip \

@@ -348,6 +348,9 @@ jobs:
           sudo rm -f "$FB_DB"
           echo "CREATE DATABASE 'localhost:$FB_DB' USER 'test' PASSWORD 'test' ROLE 'RDB\$ADMIN';" \
             | sudo isql-fb -q
+          # Enable IPv6 on loopback so the ::1 based tests (sockets, snmp, ...) work.
+          # Best effort: ignored if the runner does not allow changing sysctls.
+          sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0 net.ipv6.conf.lo.disable_ipv6=0 || true
           sudo cp ext/snmp/tests/snmpd.conf /etc/snmp
           sudo cp ext/snmp/tests/bigtest /etc/snmp
           # snmpd.conf binds udp6:[::1]:161. If IPv6 is disabled on the host

@@ -74,6 +74,33 @@ static int pdo_sqlite_stmt_execute(pdo_stmt_t *stmt)
 	}
 }
 
+static void pdo_sqlite_release_string(void *value)
+{
+	zend_string_release(ZEND_CONTAINER_OF((char *) value, zend_string, val[0]));
+}
+
+static bool pdo_sqlite_bind_string(pdo_stmt_t *stmt, int index, zend_string *value, bool blob)
+{
+	pdo_sqlite_stmt *S = (pdo_sqlite_stmt *) stmt->driver_data;
+	int rc = SQLITE_TOOBIG;
+	if (EXPECTED(ZSTR_LEN(value) <= INT_MAX)) {
+		int length = (int) ZSTR_LEN(value);
+		zend_string_addref(value);
+		rc = blob
+			? sqlite3_bind_blob(S->stmt, index, ZSTR_VAL(value), length, pdo_sqlite_release_string)
+			: sqlite3_bind_text(S->stmt, index, ZSTR_VAL(value), length, pdo_sqlite_release_string);
+	}
+	if (rc != SQLITE_OK) {
+		if (rc == SQLITE_TOOBIG && sqlite3_bind_null(S->stmt, index) == SQLITE_OK) {
+			pdo_sqlite_error_stmt_code(stmt, SQLITE_TOOBIG);
+		} else {
+			pdo_sqlite_error_stmt(stmt);
+		}
+		return false;
+	}
+	return true;
+}
+
 static int pdo_sqlite_stmt_param_hook(pdo_stmt_t *stmt, struct pdo_bound_param_data *param,
 		enum pdo_param_event event_type)
 {
@@ -138,7 +165,7 @@ static int pdo_sqlite_stmt_param_hook(pdo_stmt_t *stmt, struct pdo_bound_param_d
 						}
 						if (Z_TYPE_P(parameter) == IS_RESOURCE) {
 							php_stream *stm = NULL;
-							php_stream_from_zval_no_verify(stm, parameter);
+							php_stream_from_res_no_verify(stm, Z_RES_P(parameter));
 							if (stm) {
 								zend_string *mem = php_stream_copy_to_mem(stm, PHP_STREAM_COPY_ALL, 0);
 								zval_ptr_dtor(parameter);
@@ -159,13 +186,7 @@ static int pdo_sqlite_stmt_param_hook(pdo_stmt_t *stmt, struct pdo_bound_param_d
 							}
 						}
 
-						if (SQLITE_OK == sqlite3_bind_blob(S->stmt, param->paramno + 1,
-								Z_STRVAL_P(parameter),
-								Z_STRLEN_P(parameter),
-								SQLITE_STATIC)) {
-							return 1;
-						}
-						return 0;
+						return pdo_sqlite_bind_string(stmt, param->paramno + 1, Z_STR_P(parameter), true);
 
 					case PDO_PARAM_STR:
 					default:
@@ -182,12 +203,7 @@ static int pdo_sqlite_stmt_param_hook(pdo_stmt_t *stmt, struct pdo_bound_param_d
 							if (!try_convert_to_string(parameter)) {
 								return 0;
 							}
-							if (SQLITE_OK == sqlite3_bind_text(S->stmt, param->paramno + 1,
-									Z_STRVAL_P(parameter),
-									Z_STRLEN_P(parameter),
-									SQLITE_STATIC)) {
-								return 1;
-							}
+							return pdo_sqlite_bind_string(stmt, param->paramno + 1, Z_STR_P(parameter), false);
 						}
 						pdo_sqlite_error_stmt(stmt);
 						return 0;
@@ -273,20 +289,16 @@ static int pdo_sqlite_stmt_get_col(
 
 		case SQLITE_INTEGER: {
 			int64_t i = sqlite3_column_int64(S->stmt, colno);
-#if SIZEOF_ZEND_LONG < 8
-			if (i > ZEND_LONG_MAX || i < ZEND_LONG_MIN) {
+			if (!ZEND_IN_RANGE_OF(i, zend_long)) {
 				const char *text = (const char *) sqlite3_column_text(S->stmt, colno);
 				if (UNEXPECTED(!text)) {
 					pdo_sqlite_error_stmt(stmt);
 					return 0;
 				}
-				ZVAL_STRINGL(result,
-					text,
-					sqlite3_column_bytes(S->stmt, colno));
-				return 1;
+				ZVAL_STRINGL(result, text, sqlite3_column_bytes(S->stmt, colno));
+			} else {
+				ZVAL_LONG(result, i);
 			}
-#endif
-			ZVAL_LONG(result, i);
 			return 1;
 		}
 

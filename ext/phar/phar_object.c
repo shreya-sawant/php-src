@@ -1360,7 +1360,7 @@ static phar_entry_data *phar_build_entry_data(zend_string *fname, char *path, si
 		}
 
 		/* Sanity check bounds. See GH-14141. */
-		if (ZEND_LONG_UINT_OVFL(Z_LVAL(rv))) {
+		if (!ZEND_IN_RANGE_OF(Z_LVAL(rv), uint32_t)) {
 			*error = estrdup("timestamp is limited to 32-bit");
 			return NULL;
 		}
@@ -1407,7 +1407,7 @@ static int phar_build(zend_object_iterator *iter, void *puser) /* {{{ */
 		case IS_STRING:
 			break;
 		case IS_RESOURCE:
-			php_stream_from_zval_no_verify(fp, value);
+			php_stream_from_res_no_verify(fp, Z_RES_P(value));
 
 			if (!fp) {
 				zend_throw_exception_ex(spl_ce_BadMethodCallException, 0, "Iterator %pS returned an invalid stream handle", ce->name);
@@ -2849,7 +2849,7 @@ PHP_METHOD(Phar, setStub)
 			RETURN_THROWS();
 		}
 
-		if ((php_stream_from_zval_no_verify(stream, zstub)) != NULL) {
+		if ((php_stream_from_res_no_verify(stream, Z_RES_P(zstub))) != NULL) {
 			if (phar_obj->archive->is_persistent && FAILURE == phar_copy_on_write(&(phar_obj->archive))) {
 				zend_throw_exception_ex(phar_ce_PharException, 0, "phar \"%pS\" is persistent, unable to copy on write", phar_obj->archive->fname);
 				RETURN_THROWS();
@@ -2989,10 +2989,10 @@ PHP_METHOD(Phar, setDefaultStub)
 PHP_METHOD(Phar, setSignatureAlgorithm)
 {
 	zend_long algo;
-	char *error, *key = NULL;
-	size_t key_len = 0;
+	char *error;
+	zend_string *key = NULL;
 
-	if (zend_parse_parameters(ZEND_NUM_ARGS(), "l|s!", &algo, &key, &key_len) != SUCCESS) {
+	if (zend_parse_parameters(ZEND_NUM_ARGS(), "l|S!", &algo, &key) != SUCCESS) {
 		RETURN_THROWS();
 	}
 
@@ -3018,8 +3018,10 @@ PHP_METHOD(Phar, setSignatureAlgorithm)
 			}
 			phar_obj->archive->sig_flags = (uint32_t)algo;
 			phar_obj->archive->is_modified = 1;
-			PHAR_G(openssl_privatekey) = key;
-			PHAR_G(openssl_privatekey_len) = key_len;
+			if (PHAR_G(openssl_privatekey)) {
+				zend_string_release(PHAR_G(openssl_privatekey));
+			}
+			PHAR_G(openssl_privatekey) = key ? zend_string_copy(key) : NULL;
 
 			phar_flush(phar_obj->archive, &error);
 			if (error) {

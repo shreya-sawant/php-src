@@ -20,7 +20,7 @@
 /* {{{ includes */
 
 #include "php.h"
-#include "ext/standard/flock_compat.h"
+#include "main/flock_compat.h"
 #include "ext/standard/php_filestat.h"
 #include "php_open_temporary_file.h"
 #include "ext/standard/basic_functions.h"
@@ -136,19 +136,9 @@ static void file_globals_dtor(php_file_globals *file_globals_p)
 #endif
 }
 
-static PHP_INI_MH(OnUpdateAutoDetectLineEndings)
-{
-	if (zend_ini_parse_bool(new_value)) {
-		zend_error(E_DEPRECATED, "auto_detect_line_endings is deprecated");
-	}
-	return OnUpdateBool(entry, new_value, mh_arg1, mh_arg2, mh_arg3, stage);
-}
-
 PHP_INI_BEGIN()
 	STD_PHP_INI_ENTRY("user_agent", NULL, PHP_INI_ALL, OnUpdateStr, user_agent, php_file_globals, file_globals)
 	STD_PHP_INI_ENTRY("from", NULL, PHP_INI_ALL, OnUpdateStr, from_address, php_file_globals, file_globals)
-	STD_PHP_INI_ENTRY("default_socket_timeout", "60", PHP_INI_ALL, OnUpdateLong, default_socket_timeout, php_file_globals, file_globals)
-	STD_PHP_INI_BOOLEAN("auto_detect_line_endings", "0", PHP_INI_ALL, OnUpdateAutoDetectLineEndings, auto_detect_line_endings, php_file_globals, file_globals)
 PHP_INI_END()
 
 PHP_MINIT_FUNCTION(file)
@@ -343,13 +333,10 @@ PHP_FUNCTION(get_meta_tags)
 				} else {
 					add_assoc_string(return_value, name, "");
 				}
-
-				efree(name);
-				if (value) efree(value);
-			} else if (have_content) {
-				efree(value);
 			}
 
+			if (name) efree(name);
+			if (value) efree(value);
 			name = value = NULL;
 
 			/* Reset all of our flags */
@@ -470,7 +457,7 @@ PHP_FUNCTION(file_put_contents)
 	ZEND_PARSE_PARAMETERS_END();
 
 	if (Z_TYPE_P(data) == IS_RESOURCE) {
-		php_stream_from_zval(srcstream, data);
+		php_stream_from_res(srcstream, Z_RES_P(data));
 	}
 
 	php_stream_error_operation_begin();
@@ -884,9 +871,9 @@ PHP_FUNCTION(pclose)
 		GC_ADDREF(context->res);
 	}
 	php_stream_error_operation_begin();
-	FG(pclose_wait) = 1;
+	FG(pclose_wait) = true;
 	zend_list_close(stream->res);
-	FG(pclose_wait) = 0;
+	FG(pclose_wait) = false;
 	php_stream_error_operation_end(context);
 	if (context) {
 		zend_list_delete(context->res);

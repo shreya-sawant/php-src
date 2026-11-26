@@ -86,7 +86,7 @@ xmlNodePtr php_dom_libxml_hash_iter(xmlHashTable *ht, zend_long index)
 	if (index < 0) {
 		return NULL;
 	}
-	if (UNEXPECTED(ZEND_LONG_INT_OVFL(index))) {
+	if (!ZEND_IN_RANGE_OF(index, int)) {
 		zend_value_error("must be between 0 and %d", INT_MAX);
 		return NULL;
 	}
@@ -140,6 +140,8 @@ static void php_dom_iterator_current_key(zend_object_iterator *iter, zval *key) 
 	 * are keyed by the name because in that case the name is unique. */
 	if (objmap->handler->nameless) {
 		ZVAL_LONG(key, iterator->index);
+	} else if (Z_TYPE(iterator->curobj) != IS_OBJECT) {
+		ZVAL_NULL(key);
 	} else {
 		dom_object *intern = Z_DOMOBJ_P(&iterator->curobj);
 

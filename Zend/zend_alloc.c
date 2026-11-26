@@ -480,10 +480,18 @@ ZEND_COLD void zend_mm_oom_info_dtor(zend_oom_info *info)
 	}
 }
 
-#ifdef ZEND_MM_LIMIT
-ZEND_NORETURN static ZEND_COLD void zend_mm_hard_limit_error(zend_mm_heap *heap,
-		size_t add_size ZEND_FILE_LINE_DC)
+ZEND_NORETURN ZEND_API ZEND_COLD void zend_mm_unrecoverable_error(const char *format, ...)
 {
+	va_list args;
+	va_start(args, format);
+
+	char buf[1024];
+	if (vsnprintf(buf, sizeof(buf), format, args) < 0) {
+		abort();
+	}
+
+	va_end(args);
+
 	zend_string *script_filename = NULL;
 	uint32_t script_lineno = 0;
 
@@ -500,24 +508,25 @@ ZEND_NORETURN static ZEND_COLD void zend_mm_hard_limit_error(zend_mm_heap *heap,
 		script_lineno = 0;
 	}
 
-	fprintf(stderr,
+	fprintf(stderr, "%s in %s on line %" PRIu32 "\n", buf, ZSTR_VAL(script_filename), script_lineno);
+	fflush(stderr);
+
+	_exit(137);
+}
+
+#ifdef ZEND_MM_LIMIT
+ZEND_NORETURN static ZEND_COLD void zend_mm_hard_limit_error(zend_mm_heap *heap,
+		size_t add_size ZEND_FILE_LINE_DC)
+{
+	zend_mm_unrecoverable_error(
 # if ZEND_DEBUG
-			"Hard memory limit of %zu bytes exhausted at %s:%d (tried to allocate %zu bytes) in %s on line %d\n",
+			"Hard memory limit of %zu bytes exhausted at %s:%d (tried to allocate %zu bytes)",
 # else
-			"Hard memory limit of %zu bytes exhausted (tried to allocate %zu bytes) in %s on line %d\n",
+			"Hard memory limit of %zu bytes exhausted (tried to allocate %zu bytes)",
 # endif
 			heap->hard_limit
 			ZEND_FILE_LINE_RELAY_CC,
-			add_size,
-			ZSTR_VAL(script_filename),
-			script_lineno);
-
-	/* See http://support.microsoft.com/kb/190351 */
-# ifdef ZEND_WIN32
-	fflush(stderr);
-# endif
-
-	_exit(137);
+			add_size);
 }
 #endif /* ZEND_MM_LIMIT */
 
@@ -1825,6 +1834,10 @@ static zend_never_inline void *zend_mm_realloc_huge(zend_mm_heap *heap, void *pt
 #if ZEND_DEBUG
 	real_size = size;
 	size = ZEND_MM_ALIGNED_SIZE(size) + ZEND_MM_ALIGNED_SIZE(sizeof(zend_mm_debug_info));
+	if (UNEXPECTED(size < real_size)) {
+		zend_mm_delayed_error_or_panic(heap->fallible, "Possible integer overflow in memory allocation (%zu + %zu)", ZEND_MM_ALIGNED_SIZE(real_size), ZEND_MM_ALIGNED_SIZE(sizeof(zend_mm_debug_info)));
+		return NULL;
+	}
 #endif
 	if (size > ZEND_MM_MAX_LARGE_SIZE) {
 #if ZEND_DEBUG
@@ -1835,10 +1848,15 @@ static zend_never_inline void *zend_mm_realloc_huge(zend_mm_heap *heap, void *pt
 		 * We allocate them with 2MB size granularity, to avoid many
 		 * reallocations when they are extended by small pieces
 		 */
-		new_size = ZEND_MM_ALIGNED_SIZE_EX(size, MAX(REAL_PAGE_SIZE, ZEND_MM_CHUNK_SIZE));
+		size_t alignment = MAX(REAL_PAGE_SIZE, ZEND_MM_CHUNK_SIZE);
 #else
-		new_size = ZEND_MM_ALIGNED_SIZE_EX(size, REAL_PAGE_SIZE);
+		size_t alignment = REAL_PAGE_SIZE;
 #endif
+		new_size = ZEND_MM_ALIGNED_SIZE_EX(size, alignment);
+		if (UNEXPECTED(new_size < size)) {
+			zend_mm_delayed_error_or_panic(heap->fallible, "Possible integer overflow in memory allocation (%zu + %zu)", size, alignment);
+			return NULL;
+		}
 		if (new_size == old_size) {
 #if ZEND_DEBUG
 			zend_mm_change_huge_block_size(heap, ptr, new_size, real_size ZEND_FILE_LINE_RELAY_CC ZEND_FILE_LINE_ORIG_RELAY_CC);
@@ -1920,6 +1938,10 @@ static zend_always_inline void *zend_mm_realloc_heap(zend_mm_heap *heap, void *p
 		size_t real_size = size;
 
 		size = ZEND_MM_ALIGNED_SIZE(size) + ZEND_MM_ALIGNED_SIZE(sizeof(zend_mm_debug_info));
+		if (UNEXPECTED(size < real_size)) {
+			zend_mm_delayed_error_or_panic(heap->fallible, "Possible integer overflow in memory allocation (%zu + %zu)", ZEND_MM_ALIGNED_SIZE(real_size), ZEND_MM_ALIGNED_SIZE(sizeof(zend_mm_debug_info)));
+			return NULL;
+		}
 #endif
 
 		ZEND_MM_CHECK(chunk->heap == heap, "zend_mm_heap corrupted");

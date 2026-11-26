@@ -2249,8 +2249,12 @@ PHP_FUNCTION(simplexml_load_file)
 		RETURN_THROWS();
 	}
 
-	if (ZEND_LONG_EXCEEDS_INT(options)) {
+	if (!ZEND_IN_RANGE_OF(options, int)) {
 		zend_argument_value_error(3, "is too large");
+		RETURN_THROWS();
+	}
+
+	if (ce && UNEXPECTED(zend_update_class_constants(ce) != SUCCESS)) {
 		RETURN_THROWS();
 	}
 
@@ -2295,16 +2299,20 @@ PHP_FUNCTION(simplexml_load_string)
 		RETURN_THROWS();
 	}
 
-	if (ZEND_SIZE_T_INT_OVFL(data_len)) {
+	if (!ZEND_IN_RANGE_OF(data_len, int)) {
 		zend_argument_value_error(1, "is too long");
 		RETURN_THROWS();
 	}
-	if (ZEND_SIZE_T_INT_OVFL(ZSTR_LEN(ns))) {
+	if (!ZEND_IN_RANGE_OF(ZSTR_LEN(ns), int)) {
 		zend_argument_value_error(4, "is too long");
 		RETURN_THROWS();
 	}
-	if (ZEND_LONG_EXCEEDS_INT(options)) {
+	if (!ZEND_IN_RANGE_OF(options, int)) {
 		zend_argument_value_error(3, "is too large");
+		RETURN_THROWS();
+	}
+
+	if (ce && UNEXPECTED(zend_update_class_constants(ce) != SUCCESS)) {
 		RETURN_THROWS();
 	}
 
@@ -2346,15 +2354,15 @@ PHP_METHOD(SimpleXMLElement, __construct)
 		RETURN_THROWS();
 	}
 
-	if (ZEND_SIZE_T_INT_OVFL(ZSTR_LEN(data))) {
+	if (!ZEND_IN_RANGE_OF(ZSTR_LEN(data), int)) {
 		zend_argument_error(zend_ce_exception, 1, "is too long");
 		RETURN_THROWS();
 	}
-	if (ZEND_SIZE_T_INT_OVFL(ZSTR_LEN(ns))) {
+	if (!ZEND_IN_RANGE_OF(ZSTR_LEN(ns), int)) {
 		zend_argument_error(zend_ce_exception, 4, "is too long");
 		RETURN_THROWS();
 	}
-	if (ZEND_LONG_EXCEEDS_INT(options)) {
+	if (!ZEND_IN_RANGE_OF(options, int)) {
 		zend_argument_error(zend_ce_exception, 2, "is invalid");
 		RETURN_THROWS();
 	}
@@ -2614,6 +2622,10 @@ PHP_FUNCTION(simplexml_import_dom)
 	zend_function    *fptr_count;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "o|C!", &node, &ce) == FAILURE) {
+		RETURN_THROWS();
+	}
+
+	if (ce && UNEXPECTED(zend_update_class_constants(ce) != SUCCESS)) {
 		RETURN_THROWS();
 	}
 

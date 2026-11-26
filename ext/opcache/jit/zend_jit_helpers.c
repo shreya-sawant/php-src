@@ -309,24 +309,10 @@ static zend_execute_data* ZEND_FASTCALL zend_jit_int_extend_stack_helper(uint32_
 static zval* ZEND_FASTCALL zend_jit_symtable_find(HashTable *ht, zend_string *str)
 {
 	zend_ulong idx;
-	register const char *tmp = str->val;
 
-	do {
-		if (*tmp > '9') {
-			break;
-		} else if (*tmp < '0') {
-			if (*tmp != '-') {
-				break;
-			}
-			tmp++;
-			if (*tmp > '9' || *tmp < '0') {
-				break;
-			}
-		}
-		if (_zend_handle_numeric_str_ex(str->val, str->len, &idx)) {
-			return zend_hash_index_find(ht, idx);
-		}
-	} while (0);
+	if (ZEND_HANDLE_NUMERIC(str, idx)) {
+		return zend_hash_index_find(ht, idx);
+	}
 
 	return zend_hash_find(ht, str);
 }
@@ -367,29 +353,15 @@ static zval* ZEND_FASTCALL zend_jit_hash_lookup_rw(HashTable *ht, zend_string *s
 static zval* ZEND_FASTCALL zend_jit_symtable_lookup_rw(HashTable *ht, zend_string *str)
 {
 	zend_ulong idx;
-	register const char *tmp = str->val;
 	zval *retval;
 
-	do {
-		if (*tmp > '9') {
-			break;
-		} else if (*tmp < '0') {
-			if (*tmp != '-') {
-				break;
-			}
-			tmp++;
-			if (*tmp > '9' || *tmp < '0') {
-				break;
-			}
+	if (ZEND_HANDLE_NUMERIC(str, idx)) {
+		retval = zend_hash_index_find(ht, idx);
+		if (!retval) {
+			retval = zend_undefined_offset_write(ht, idx);
 		}
-		if (_zend_handle_numeric_str_ex(str->val, str->len, &idx)) {
-			retval = zend_hash_index_find(ht, idx);
-			if (!retval) {
-				retval = zend_undefined_offset_write(ht, idx);
-			}
-			return retval;
-		}
-	} while (0);
+		return retval;
+	}
 
 	retval = zend_hash_find(ht, str);
 	if (!retval) {
@@ -402,24 +374,10 @@ static zval* ZEND_FASTCALL zend_jit_symtable_lookup_rw(HashTable *ht, zend_strin
 static zval* ZEND_FASTCALL zend_jit_symtable_lookup_w(HashTable *ht, zend_string *str)
 {
 	zend_ulong idx;
-	register const char *tmp = str->val;
 
-	do {
-		if (*tmp > '9') {
-			break;
-		} else if (*tmp < '0') {
-			if (*tmp != '-') {
-				break;
-			}
-			tmp++;
-			if (*tmp > '9' || *tmp < '0') {
-				break;
-			}
-		}
-		if (_zend_handle_numeric_str_ex(str->val, str->len, &idx)) {
-			return zend_hash_index_lookup(ht, idx);
-		}
-	} while (0);
+	if (ZEND_HANDLE_NUMERIC(str, idx)) {
+		return zend_hash_index_lookup(ht, idx);
+	}
 
 	return zend_hash_lookup(ht, str);
 }
@@ -1692,13 +1650,6 @@ static void ZEND_FASTCALL zend_jit_assign_dim_helper(zval *object_ptr, zval *dim
 		return;
 	}
 
-	if (UNEXPECTED(Z_TYPE_P(value) == IS_UNDEF)) {
-		const zend_op *op_data = EG(current_execute_data)->opline + 1;
-		ZEND_ASSERT(op_data->opcode == ZEND_OP_DATA && op_data->op1_type == IS_CV);
-		zend_jit_undefined_op_helper(op_data->op1.var);
-		value = &EG(uninitialized_zval);
-	}
-
 	if (EXPECTED(Z_TYPE_P(object_ptr) == IS_STRING)) {
 		zend_throw_error(NULL, "[] operator not supported for strings");
 		if (result) {
@@ -1728,16 +1679,30 @@ static void ZEND_FASTCALL zend_jit_assign_dim_helper(zval *object_ptr, zval *dim
 			return;
 		}
 
+		if (UNEXPECTED(Z_TYPE_P(value) == IS_UNDEF)) {
+			/* EX(opline) no longer points to ASSIGN_DIM after a throw; the VM skips the warning too. */
+			if (EXPECTED(!EG(exception))) {
+				const zend_op *op_data = EG(current_execute_data)->opline + 1;
+				ZEND_ASSERT(op_data->opcode == ZEND_OP_DATA && op_data->op1_type == IS_CV);
+				if (!zend_jit_undefined_op_helper_write(arr, op_data->op1.var)) {
+					if (result) {
+						if (EG(exception)) {
+							ZVAL_UNDEF(result);
+						} else {
+							ZVAL_NULL(result);
+						}
+					}
+					return;
+				}
+			}
+			value = &EG(uninitialized_zval);
+		}
+
 		ZVAL_COPY_DEREF(var, value);
 		if (result) {
 			ZVAL_COPY(result, var);
 		}
 	} else {
-		if (dim && UNEXPECTED(Z_TYPE_P(dim) == IS_UNDEF)) {
-			const zend_op *opline = EG(current_execute_data)->opline;
-			zend_jit_undefined_op_helper(opline->op2.var);
-			dim = &EG(uninitialized_zval);
-		}
 		zend_throw_error(NULL, "Cannot use a scalar value as an array");
 		if (result) {
 			ZVAL_UNDEF(result);

@@ -5382,12 +5382,12 @@ static zend_result zend_compile_func_array_map(znode *result, zend_ast_list *arg
 		return FAILURE;
 	}
 
-	/* Bail out if we do not have exactly two parameters. */
+	/* Skip the optimization if we do not have exactly two parameters. */
 	if (args->children != 2) {
 		return FAILURE;
 	}
 
-	/* Bail out if callback is not a first class callable */
+	/* Skip the optimization if callback is not a first class callable. */
 	zend_ast *callback = args->child[0];
 	if (callback->kind != ZEND_AST_CALL && callback->kind != ZEND_AST_STATIC_CALL) {
 		return FAILURE;
@@ -5416,6 +5416,25 @@ static zend_result zend_compile_func_array_map(znode *result, zend_ast_list *arg
 		if (arg->kind != ZEND_AST_ZVAL) {
 			return FAILURE;
 		}
+	}
+
+	/* Skip the optimization if the input array is known at compile time to not
+	 * be an array, before compiling any callee expressions or emitting opcodes. */
+	zend_eval_const_expr(&args->child[1]);
+	if (args->child[1]->kind == ZEND_AST_ZVAL
+	 && Z_TYPE_P(zend_ast_get_zval(args->child[1])) != IS_ARRAY) {
+		return FAILURE;
+	}
+
+	znode value;
+	value.op_type = IS_TMP_VAR;
+	value.u.op.var = get_temporary_variable();
+
+	zend_ast *call_args = zend_partial_apply(callback,
+			zend_ast_create_znode(&value));
+	if (!call_args) {
+		CG(active_op_array)->T--;
+		return FAILURE;
 	}
 
 	/* Evaluate class name */
@@ -5463,34 +5482,21 @@ static zend_result zend_compile_func_array_map(znode *result, zend_ast_list *arg
 		}
 	}
 
-	znode value;
-	value.op_type = IS_TMP_VAR;
-	value.u.op.var = get_temporary_variable();
-
-	zend_ast *call_args = zend_partial_apply(callback,
-			zend_ast_create_znode(&value));
-	if (!call_args) {
-		goto fail;
-	}
-
 	zend_op *opline;
 
 	znode array;
 	zend_compile_expr(&array, args->child[1]);
-	/* array is an argument to both ZEND_TYPE_ASSERT and to ZEND_FE_RESET_R. */
-	if (array.op_type == IS_CONST) {
-		if (Z_TYPE(array.u.constant) != IS_ARRAY) {
-			zval_ptr_dtor_nogc(&array.u.constant);
-			goto fail;
-		}
-		Z_TRY_ADDREF(array.u.constant);
-	}
 
 	/* Verify that the input array actually is an array. */
 	znode name;
 	name.op_type = IS_CONST;
 	ZVAL_STR_COPY(&name.u.constant, lcname);
 	opline = zend_emit_op(NULL, ZEND_TYPE_ASSERT, &name, &array);
+	/* array is an argument to both ZEND_TYPE_ASSERT and to ZEND_FE_RESET_R.
+	 * Addref after emitting the opline so string literals are interned first. */
+	if (opline->op2_type == IS_CONST) {
+		Z_TRY_ADDREF_P(CT_CONSTANT(opline->op2));
+	}
 	opline->lineno = lineno;
 	opline->extended_value = (2 << 16) | IS_ARRAY;
 	const zval *fbc_zv = zend_hash_find(CG(function_table), lcname);
@@ -5567,17 +5573,6 @@ static zend_result zend_compile_func_array_map(znode *result, zend_ast_list *arg
 	}
 
 	return SUCCESS;
-
-fail:
-	CG(active_op_array)->T--;
-	if (func_node.op_type == IS_CONST) {
-		zval_ptr_dtor_nogc(&func_node.u.constant);
-	}
-	if (class_node.op_type == IS_CONST) {
-		zval_ptr_dtor_nogc(&class_node.u.constant);
-	}
-
-	return FAILURE;
 }
 
 static zend_result zend_try_compile_special_func_ex(znode *result, zend_string *lcname, zend_ast_list *args, uint32_t type, uint32_t lineno) /* {{{ */
@@ -8315,23 +8310,12 @@ static void zend_compile_attributes(
 
 	if (*attributes != NULL) {
 		/* Allow delaying target validation for forward compatibility. */
-		const zend_attribute *delayed_target_validation = NULL;
-		if (target == ZEND_ATTRIBUTE_TARGET_PARAMETER) {
-			ZEND_ASSERT(offset >= 1);
-			/* zend_get_parameter_attribute_str will add 1 too */
-			delayed_target_validation = zend_get_parameter_attribute_str(
-				*attributes,
-				"delayedtargetvalidation",
-				strlen("delayedtargetvalidation"),
-				offset - 1
-			);
-		} else {
-			delayed_target_validation = zend_get_attribute_str(
-				*attributes,
-				"delayedtargetvalidation",
-				strlen("delayedtargetvalidation")
-			);
-		}
+		const zend_attribute *delayed_target_validation = zend_get_attribute_str_ex(
+			*attributes,
+			"delayedtargetvalidation",
+			strlen("delayedtargetvalidation"),
+			offset
+		);
 		/* Validate attributes in a secondary loop (needed to detect repeated attributes). */
 		ZEND_HASH_PACKED_FOREACH_PTR(*attributes, attr) {
 			if (attr->offset != offset || NULL == (config = zend_internal_attribute_get(attr->lcname))) {
@@ -8866,6 +8850,10 @@ static void find_implicit_binds_recursively(closure_info *info, zend_ast *ast) {
 			zend_hash_copy(&info->uses, &inner_info.uses, NULL);
 		}
 		zend_hash_destroy(&inner_info.uses);
+	} else if (ast->kind == ZEND_AST_CALLABLE_CONVERT) {
+		/* The arguments of a partial application are not child nodes. */
+		const zend_ast_fcc *fcc_ast = (const zend_ast_fcc *) ast;
+		find_implicit_binds_recursively(info, fcc_ast->args);
 	} else if (!zend_ast_is_special(ast)) {
 		uint32_t i, children = zend_ast_get_num_children(ast);
 		for (i = 0; i < children; i++) {
@@ -10540,16 +10528,16 @@ static void zend_compile_const_decl(zend_ast *ast) /* {{{ */
 		);
 	}
 
-	HashTable *attributes = NULL;
-	zend_compile_attributes(&attributes, list->child[1], 0, ZEND_ATTRIBUTE_TARGET_CONST, 0);
+	/* Constants can only be declared at the top level, so the attributes of
+	 * all constants of a file are stored in the attributes table of the main op_array. */
+	HashTable **attributes = &CG(active_op_array)->attributes;
+	ZEND_ASSERT(!CG(active_op_array)->function_name);
+	uint32_t offset = *attributes ? zend_hash_num_elements(*attributes) : 0;
+	zend_compile_attributes(attributes, list->child[1], offset, ZEND_ATTRIBUTE_TARGET_CONST, 0);
 
 	ZEND_ASSERT(last_op != NULL);
 	last_op->opcode = ZEND_DECLARE_ATTRIBUTED_CONST;
-	znode attribs_node;
-	attribs_node.op_type = IS_CONST;
-	ZVAL_PTR(&attribs_node.u.constant, attributes);
-	zend_emit_op_data(&attribs_node);
-	CG(active_op_array)->fn_flags |= ZEND_ACC_PTR_OPS;
+	last_op->extended_value = offset;
 }
 /* }}}*/
 

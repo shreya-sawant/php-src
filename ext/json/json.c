@@ -249,7 +249,7 @@ PHP_FUNCTION(json_encode)
 		Z_PARAM_LONG(depth)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if (ZEND_LONG_EXCEEDS_INT(depth)) {
+	if (!ZEND_IN_RANGE_OF(depth, int)) {
 		zend_argument_value_error(3, "must be between %d and %d", INT_MIN, INT_MAX);
 		RETURN_THROWS();
 	}
@@ -322,7 +322,7 @@ PHP_FUNCTION(json_decode)
 	}
 
 	if (depth > INT_MAX) {
-		zend_argument_value_error(3, "must be less than %d", INT_MAX);
+		zend_argument_value_error(3, "must be less than or equal to %d", INT_MAX);
 		RETURN_THROWS();
 	}
 
@@ -378,7 +378,7 @@ PHP_FUNCTION(json_validate)
 	}
 
 	if (depth > INT_MAX) {
-		zend_argument_value_error(2, "must be less than %d", INT_MAX);
+		zend_argument_value_error(2, "must be less than or equal to %d", INT_MAX);
 		RETURN_THROWS();
 	}
 

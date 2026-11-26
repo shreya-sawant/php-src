@@ -83,6 +83,15 @@ static PHP_MINIT_FUNCTION(posix)
 }
 /* }}} */
 
+/* {{{ PHP_RSHUTDOWN_FUNCTION(posix) */
+static PHP_RSHUTDOWN_FUNCTION(posix)
+{
+	POSIX_G(last_error) = 0;
+
+	return SUCCESS;
+}
+/* }}} */
+
 /* {{{ posix_module_entry */
 zend_module_entry posix_module_entry = {
 	STANDARD_MODULE_HEADER,
@@ -91,7 +100,7 @@ zend_module_entry posix_module_entry = {
 	PHP_MINIT(posix),
 	NULL,
 	NULL,
-	NULL,
+	PHP_RSHUTDOWN(posix),
 	PHP_MINFO(posix),
 	PHP_POSIX_VERSION,
 	PHP_MODULE_GLOBALS(posix),
@@ -436,11 +445,11 @@ PHP_FUNCTION(posix_ctermid)
 /* }}} */
 
 /* Checks if the provides resource is a stream and if it provides a file descriptor */
-static zend_result php_posix_stream_get_fd(zval *zfp, zend_long *ret) /* {{{ */
+static zend_result php_posix_stream_get_fd(zend_resource *zfp, zend_long *ret) /* {{{ */
 {
 	php_stream *stream;
 
-	php_stream_from_zval_no_verify(stream, zfp);
+	php_stream_from_res_no_verify(stream, zfp);
 
 	if (stream == NULL) {
 		return FAILURE;
@@ -481,7 +490,7 @@ PHP_FUNCTION(posix_ttyname)
 	ZEND_PARSE_PARAMETERS_END();
 
 	if (Z_TYPE_P(z_fd) == IS_RESOURCE) {
-		if (php_posix_stream_get_fd(z_fd, &fd) == FAILURE) {
+		if (php_posix_stream_get_fd(Z_RES_P(z_fd), &fd) == FAILURE) {
 			RETURN_FALSE;
 		}
 	} else {
@@ -543,7 +552,7 @@ PHP_FUNCTION(posix_isatty)
 	ZEND_PARSE_PARAMETERS_END();
 
 	if (Z_TYPE_P(z_fd) == IS_RESOURCE) {
-		if (php_posix_stream_get_fd(z_fd, &fd) == FAILURE) {
+		if (php_posix_stream_get_fd(Z_RES_P(z_fd), &fd) == FAILURE) {
 			RETURN_FALSE;
 		}
 	} else {
@@ -733,6 +742,11 @@ PHP_FUNCTION(posix_access)
 		Z_PARAM_OPTIONAL
 		Z_PARAM_LONG(mode)
 	ZEND_PARSE_PARAMETERS_END();
+
+	if (filename_len == 0) {
+		zend_argument_must_not_be_empty_error(1);
+		RETURN_THROWS();
+	}
 
 	path = expand_filepath(filename, NULL);
 	if (!path) {
@@ -1363,7 +1377,7 @@ PHP_FUNCTION(posix_fpathconf)
 	ZEND_PARSE_PARAMETERS_END();
 
 	if (Z_TYPE_P(z_fd) == IS_RESOURCE) {
-		if (php_posix_stream_get_fd(z_fd, &fd) == FAILURE) {
+		if (php_posix_stream_get_fd(Z_RES_P(z_fd), &fd) == FAILURE) {
 			RETURN_FALSE;
 		}
 	} else {

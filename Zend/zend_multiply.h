@@ -119,7 +119,7 @@
 
 #define ZEND_SIGNED_MULTIPLY_LONG(a, b, lval, dval, usedval) do {	\
 	int64_t __result = (int64_t) (a) * (int64_t) (b);				\
-	if (__result > ZEND_LONG_MAX || __result < ZEND_LONG_MIN) {		\
+	if (!ZEND_IN_RANGE_OF(__result, zend_long)) {					\
 		(dval) = (double) __result;									\
 		(usedval) = 1;												\
 	} else {														\
@@ -340,7 +340,7 @@ static zend_always_inline size_t zend_safe_address_guarded(size_t nmemb, size_t 
 	size_t ret = zend_safe_address(nmemb, size, offset, &overflow);
 
 	if (UNEXPECTED(overflow)) {
-		zend_error_noreturn(E_ERROR, "Possible integer overflow in memory allocation (%zu * %zu + %zu)", nmemb, size, offset);
+		zend_mm_unrecoverable_error("Possible integer overflow in memory allocation (%zu * %zu + %zu)", nmemb, size, offset);
 	}
 	return ret;
 }
@@ -352,7 +352,7 @@ static zend_always_inline size_t zend_safe_addmult(size_t nmemb, size_t size, si
 	size_t ret = zend_safe_address(nmemb, size, offset, &overflow);
 
 	if (UNEXPECTED(overflow)) {
-		zend_error_noreturn(E_ERROR, "Possible integer overflow in %s (%zu * %zu + %zu)", message, nmemb, size, offset);
+		zend_mm_unrecoverable_error("Possible integer overflow in %s (%zu * %zu + %zu)", message, nmemb, size, offset);
 	}
 	return ret;
 }

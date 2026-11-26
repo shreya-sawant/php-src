@@ -94,6 +94,12 @@ zend_class_entry *php_session_update_timestamp_iface_entry;
 		return FAILURE; \
 	}
 
+#define SESSION_CHECK_UPLOAD_PROGRESS_STATE \
+	if (PS(rfc1867_enabled) && stage == ZEND_INI_STAGE_RUNTIME) { \
+		zend_throw_error(NULL, "Session ini settings cannot be changed at runtime when session.upload_progress.enabled is On");	\
+		return FAILURE;													\
+	}
+
 #define SESSION_FORBIDDEN_CHARS "=,;.[ \t\r\n\013\014"
 #define SESSION_FORBIDDEN_CHARS_FOR_ERROR_MSG "=,;.[ \\t\\r\\n\\013\\014"
 
@@ -125,9 +131,10 @@ static inline void php_rinit_session_globals(void)
 	PS(mod_user_uses_object_methods_as_handlers) = false;
 	PS(define_sid) = true;
 	PS(session_vars) = NULL;
-	PS(module_number) = my_module_number;
 	PS(in_rfc1867_update) = false;
 	ZVAL_UNDEF(&PS(http_session_vars));
+	PS(session_started_filename) = NULL;
+	PS(session_started_lineno) = 0;
 }
 
 static inline void php_session_headers_already_sent_error(int severity, const char *message) {
@@ -388,14 +395,14 @@ static zend_result php_session_valid_key_len(const char *key, size_t key_len)
 }
 
 /* Validate the full zend_string, including embedded NUL bytes. */
-zend_result php_session_valid_key_ex(const zend_string *key)
+PHPAPI zend_result php_session_valid_key_ex(const zend_string *key)
 {
 	return php_session_valid_key_len(ZSTR_VAL(key), ZSTR_LEN(key));
 }
 
 /* C-string compatibility wrapper. Callers that have a zend_string should use
  * php_session_valid_key_ex() instead. */
-PHPAPI zend_result php_session_valid_key(const char *key)
+ZEND_ATTRIBUTE_DEPRECATED PHPAPI zend_result php_session_valid_key(const char *key)
 {
 	return php_session_valid_key_len(key, strlen(key));
 }
@@ -595,6 +602,7 @@ static PHP_INI_MH(OnUpdateSaveHandler)
 	const ps_module *new_module;
 	int err_type = E_ERROR;
 
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -629,6 +637,7 @@ static PHP_INI_MH(OnUpdateSerializer)
 {
 	const ps_serializer *new_serializer;
 
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -657,6 +666,7 @@ static PHP_INI_MH(OnUpdateSerializer)
 
 static PHP_INI_MH(OnUpdateSaveDir)
 {
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -692,6 +702,7 @@ static PHP_INI_MH(OnUpdateSaveDir)
 
 static PHP_INI_MH(OnUpdateName)
 {
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -722,6 +733,7 @@ static PHP_INI_MH(OnUpdateName)
 
 static PHP_INI_MH(OnUpdateCookieLifetime)
 {
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -751,6 +763,7 @@ static PHP_INI_MH(OnUpdateCookieLifetime)
 
 static PHP_INI_MH(OnUpdateSessionLong)
 {
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -759,6 +772,7 @@ static PHP_INI_MH(OnUpdateSessionLong)
 
 static PHP_INI_MH(OnUpdateSessionStr)
 {
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -804,6 +818,7 @@ static PHP_INI_MH(OnUpdateSessionCookieDomain)
 
 static PHP_INI_MH(OnUpdateSessionSameSite)
 {
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -818,6 +833,7 @@ static PHP_INI_MH(OnUpdateSessionSameSite)
 
 static PHP_INI_MH(OnUpdateSessionBool)
 {
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -829,6 +845,7 @@ static PHP_INI_MH(OnUpdateSidLength)
 	zend_long val;
 	char *endptr = NULL;
 
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -853,6 +870,7 @@ static PHP_INI_MH(OnUpdateSidBits)
 	zend_long val;
 	char *endptr = NULL;
 
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -874,6 +892,7 @@ static PHP_INI_MH(OnUpdateSidBits)
 
 static PHP_INI_MH(OnUpdateSessionGcProbability)
 {
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -892,6 +911,7 @@ static PHP_INI_MH(OnUpdateSessionGcProbability)
 
 static PHP_INI_MH(OnUpdateSessionDivisor)
 {
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -932,6 +952,7 @@ static PHP_INI_MH(OnUpdateRfc1867Freq)
 
 static PHP_INI_MH(OnUpdateUseOnlyCookies)
 {
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -947,6 +968,7 @@ static PHP_INI_MH(OnUpdateUseOnlyCookies)
 
 static PHP_INI_MH(OnUpdateUseTransSid)
 {
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -962,6 +984,7 @@ static PHP_INI_MH(OnUpdateUseTransSid)
 
 static PHP_INI_MH(OnUpdateRefererCheck)
 {
+	SESSION_CHECK_UPLOAD_PROGRESS_STATE;
 	SESSION_CHECK_ACTIVE_STATE;
 	SESSION_CHECK_OUTPUT_STATE;
 
@@ -1008,7 +1031,7 @@ PHP_INI_BEGIN()
 
 	/* Upload progress */
 	STD_PHP_INI_BOOLEAN("session.upload_progress.enabled",
-	                                                "1",     ZEND_INI_PERDIR, OnUpdateBool,        rfc1867_enabled, php_ps_globals, ps_globals)
+	                                                "0",     ZEND_INI_PERDIR, OnUpdateBool,        rfc1867_enabled, php_ps_globals, ps_globals)
 	STD_PHP_INI_BOOLEAN("session.upload_progress.cleanup",
 	                                                "1",     ZEND_INI_PERDIR, OnUpdateBool,        rfc1867_cleanup, php_ps_globals, ps_globals)
 	STD_PHP_INI_ENTRY("session.upload_progress.prefix",
@@ -1681,7 +1704,7 @@ static void proposed_session_id_to_session_id(const zval *proposed_session_id) {
 
 PHPAPI zend_result php_session_reset_id(void)
 {
-	int module_number = PS(module_number);
+	int module_number = my_module_number;
 	zval *sid, *data, *potential_session_id;
 	bool apply_trans_sid;
 
@@ -1797,7 +1820,7 @@ PHPAPI zend_result php_session_start(void)
 	 * variables will be available.
 	 * URL/POST session ID may be used when use_only_cookies=Off.
 	 * session.use_strict_mode=On prevents session adoption.
-	 * Session based file upload progress uses non-cookie ID.
+	 * Session based file upload progress respects use_only_cookies.
 	 */
 
 	if (!PS(id)) {
@@ -2982,6 +3005,7 @@ static PHP_GINIT_FUNCTION(ps)
 	ps_globals->serializer = NULL;
 	ps_globals->mod_data = NULL;
 	ps_globals->in_rfc1867_update = false;
+	ps_globals->rfc1867_enabled = false;
 	ps_globals->session_status = php_session_none;
 	ps_globals->default_mod = NULL;
 	ps_globals->mod_user_implemented = false;
@@ -3050,9 +3074,7 @@ static PHP_MINIT_FUNCTION(session)
 	zend_register_auto_global(zend_string_init_interned(ZEND_STRL("_SESSION"), true), false, NULL);
 
 	my_module_number = module_number;
-	PS(module_number) = module_number;
 
-	PS(session_status) = php_session_none;
 	REGISTER_INI_ENTRIES();
 
 #ifdef HAVE_LIBMM
@@ -3302,7 +3324,7 @@ static zend_result php_session_rfc1867_callback(unsigned int event, void *event_
 			if (data->name && data->value && value_len) {
 				size_t name_len = strlen(data->name);
 
-				if (zend_string_equals_cstr(PS(session_name), data->name, name_len)) {
+				if (!PS(use_only_cookies) && zend_string_equals_cstr(PS(session_name), data->name, name_len)) {
 					zval_ptr_dtor(&progress->sid);
 					ZVAL_STRINGL(&progress->sid, (*data->value), value_len);
 				} else if (zend_string_equals_cstr(PS(rfc1867_name), data->name, name_len)) {

@@ -292,7 +292,7 @@ END_EXTERN_C()
 		return; \
 	} \
 } while (0)
-#define php_stream_from_res_no_verify(xstr, pzval)	(xstr) = (php_stream*)zend_fetch_resource2((res), "stream", php_file_le_stream(), php_file_le_pstream())
+#define php_stream_from_res_no_verify(xstr, res)	(xstr) = (php_stream*)zend_fetch_resource2((res), "stream", php_file_le_stream(), php_file_le_pstream())
 #define php_stream_from_zval_no_verify(xstr, pzval)	(xstr) = (php_stream*)zend_fetch_resource2_ex((pzval), "stream", php_file_le_stream(), php_file_le_pstream())
 
 static zend_always_inline php_stream* php_stream_from_zval_no_verify_no_error(zval *zval) {
@@ -329,10 +329,9 @@ static zend_always_inline bool php_stream_zend_parse_arg_into_stream(
 #define PHP_Z_PARAM_STREAM_EX(destination_stream_ptr, check_null) \
 	Z_PARAM_PROLOGUE(0, 0); \
 	if (UNEXPECTED(!php_stream_zend_parse_arg_into_stream(_arg, &destination_stream_ptr, check_null, _i))) { \
-		_error_code = ZPP_ERROR_FAILURE; \
+		_expected_type = Z_EXPECTED_FAILURE; \
 		if (!EG(exception)) { \
 			_expected_type = check_null ? Z_EXPECTED_RESOURCE_OR_NULL : Z_EXPECTED_RESOURCE; \
-			_error_code = ZPP_ERROR_WRONG_ARG; \
 		} \
 		break; \
 	}
@@ -342,10 +341,14 @@ static zend_always_inline bool php_stream_zend_parse_arg_into_stream(
 PHPAPI php_stream *php_stream_encloses(php_stream *enclosing, php_stream *enclosed);
 PHPAPI int php_stream_free_enclosed(php_stream *stream_enclosed, int close_options);
 
-PHPAPI int php_stream_from_persistent_id(const char *persistent_id, php_stream **stream);
-#define PHP_STREAM_PERSISTENT_SUCCESS	0 /* id exists */
-#define PHP_STREAM_PERSISTENT_FAILURE	1 /* id exists but is not a stream! */
-#define PHP_STREAM_PERSISTENT_NOT_EXIST	2 /* id does not exist */
+
+C23_ENUM(php_stream_persistent_status, uint8_t) {
+	PHP_STREAM_PERSISTENT_SUCCESS = 0, /* id exists */
+	PHP_STREAM_PERSISTENT_FAILURE = 1, /* id exists but is not a stream! */
+	PHP_STREAM_PERSISTENT_NOT_EXIST	= 2, /* id does not exist */
+};
+
+PHPAPI php_stream_persistent_status php_stream_from_persistent_id(const char *persistent_id, php_stream **stream);
 
 #define PHP_STREAM_FREE_CALL_DTOR			1 /* call ops->close */
 #define PHP_STREAM_FREE_RELEASE_STREAM		2 /* pefree(stream) */

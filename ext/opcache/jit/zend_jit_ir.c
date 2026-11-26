@@ -888,7 +888,7 @@ static ir_ref jit_EMALLOC(zend_jit_ctx *jit, size_t size, const zend_op_array *o
 #if ZEND_DEBUG
 	return ir_CALL_5(IR_ADDR, ir_CONST_FC_FUNC(_emalloc),
 		ir_CONST_ADDR(size),
-		op_array->filename ? ir_CONST_ADDR(op_array->filename->val) : IR_NULL,
+		op_array->filename ? ir_CONST_ADDR(ZSTR_VAL(op_array->filename)) : IR_NULL,
 		ir_CONST_U32(opline ? opline->lineno : 0),
 		IR_NULL,
 		ir_CONST_U32(0));
@@ -908,7 +908,7 @@ static ir_ref jit_EFREE(zend_jit_ctx *jit, ir_ref ptr, size_t size, const zend_o
 #if ZEND_DEBUG
 	return ir_CALL_5(IR_ADDR, ir_CONST_FC_FUNC(_efree),
 		ptr,
-		op_array && op_array->filename ? ir_CONST_ADDR(op_array->filename->val) : IR_NULL,
+		op_array && op_array->filename ? ir_CONST_ADDR(ZSTR_VAL(op_array->filename)) : IR_NULL,
 		ir_CONST_U32(opline ? opline->lineno : 0),
 		IR_NULL,
 		ir_CONST_U32(0));
@@ -4182,7 +4182,6 @@ static int zend_jit_handler(zend_jit_ctx *jit, const zend_op *opline, int may_th
 		case ZEND_ASSIGN_STATIC_PROP_REF:
 		case ZEND_ASSIGN_OBJ_REF:
 		case ZEND_FRAMELESS_ICALL_3:
-		case ZEND_DECLARE_ATTRIBUTED_CONST:
 			zend_jit_set_last_valid_opline(jit, opline + 2);
 			break;
 		default:
@@ -6720,7 +6719,9 @@ static int zend_jit_assign_to_variable(zend_jit_ctx   *jit,
 		if (res_inputs->count == 1) {
 			phi = res_inputs->refs[0];
 		} else {
-			phi = ir_PHI_N((var_def_info & MAY_BE_LONG & MAY_BE_LONG) ? IR_LONG : IR_DOUBLE,
+			/* var_def_info may be ANY (e.g. ASSIGN_DIM) so use the fact that phi inputs must be the same type,
+			 * and therefore use the type of the incoming values. */
+			phi = ir_PHI_N(jit->ctx.ir_base[res_inputs->refs[0]].type,
 				res_inputs->count, res_inputs->refs);
 		}
 		if (Z_MODE(var_addr) == IS_REG) {
@@ -17501,6 +17502,13 @@ static int zend_jit_trace_handler(zend_jit_ctx *jit, const zend_op_array *op_arr
 
 			jit_STORE_IP(jit, ir_AND_A(ref, ir_CONST_ADDR(~ZEND_VM_ENTER_BIT)));
 		} else {
+			/* A handler that jumps checks for interrupts. Once the interrupt
+			 * function has run, it returns the next opline with
+			 * ZEND_VM_ENTER_BIT set, which would fail the opline guard below
+			 * and exit to the wrong branch. */
+			if (zend_interrupt_function) {
+				ref = ir_AND_A(ref, ir_CONST_ADDR(~ZEND_VM_ENTER_BIT));
+			}
 			jit_STORE_IP(jit, ref);
 		}
 	}

@@ -1456,7 +1456,7 @@ static inline CURLcode add_form_field(php_curl *ch, curl_mime *mime, zend_string
 		prop = zend_read_property_ex(curl_CURLFile_class, Z_OBJ_P(current), ZSTR_KNOWN(ZEND_STR_NAME), /* silent */ false, &rv);
 		ZVAL_DEREF(prop);
 		if (Z_TYPE_P(prop) != IS_STRING) {
-			php_error_docref(NULL, E_WARNING, "Invalid filename for key %s", ZSTR_VAL(string_key));
+			php_error_docref(NULL, E_WARNING, "Invalid filename for key %pS", string_key);
 		} else {
 			postval = Z_STR_P(prop);
 
@@ -1865,7 +1865,7 @@ static zend_result _php_curl_setopt(php_curl *ch, zend_long option, zval *zvalue
 		case CURLOPT_MAXAGE_CONN:
 #endif
 #if LIBCURL_VERSION_NUM >= 0x074500 /* Available since 7.69.0 */
-		case CURLOPT_MAIL_RCPT_ALLLOWFAILS:
+		case CURLOPT_MAIL_RCPT_ALLOWFAILS:
 #endif
 #if LIBCURL_VERSION_NUM >= 0x074a00 /* Available since 7.74.0 */
 		case CURLOPT_HSTS_CTRL:
@@ -1888,10 +1888,14 @@ static zend_result _php_curl_setopt(php_curl *ch, zend_long option, zval *zvalue
 		case CURLOPT_CA_CACHE_TIMEOUT:
 		case CURLOPT_QUICK_EXIT:
 #endif
+#if LIBCURL_VERSION_NUM >= 0x080600 /* Available since 8.6.0 */
+		case CURLOPT_SERVER_RESPONSE_TIMEOUT_MS:
+#endif
 #if LIBCURL_VERSION_NUM >= 0x080900 /* Available since 8.9.0 */
 		case CURLOPT_TCP_KEEPCNT:
 #endif
 		case CURLOPT_FOLLOWLOCATION:
+		case CURLOPT_POSTREDIR:
 			lval = zval_get_long(zvalue);
 			if ((option == CURLOPT_PROTOCOLS || option == CURLOPT_REDIR_PROTOCOLS) &&
 				(PG(open_basedir) && *PG(open_basedir)) && (lval & CURLPROTO_FILE)) {
@@ -2030,6 +2034,12 @@ static zend_result _php_curl_setopt(php_curl *ch, zend_long option, zval *zvalue
 		case CURLOPT_PASSWORD:
 #if LIBCURL_VERSION_NUM >= 0x080e00 /* Available since 8.14.0 */
 		case CURLOPT_SSL_SIGNATURE_ALGORITHMS:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x080200 /* Available since 8.2.0 */
+		case CURLOPT_HAPROXY_CLIENT_IP:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x080800 /* Available since 8.8.0 */
+		case CURLOPT_ECH:
 #endif
 		{
 			if (Z_ISNULL_P(zvalue)) {
@@ -2257,11 +2267,6 @@ static zend_result _php_curl_setopt(php_curl *ch, zend_long option, zval *zvalue
 		case CURLOPT_TIMEVALUE_LARGE:
 			lval = zval_get_long(zvalue);
 			error = curl_easy_setopt(ch->cp, option, (curl_off_t)lval);
-			break;
-
-		case CURLOPT_POSTREDIR:
-			lval = zval_get_long(zvalue);
-			error = curl_easy_setopt(ch->cp, CURLOPT_POSTREDIR, (long) (lval & CURL_REDIR_POST_ALL));
 			break;
 
 		/* the following options deal with files, therefore the open_basedir check
@@ -3066,7 +3071,7 @@ PHP_FUNCTION(curl_escape)
 
 	ch = Z_CURL_P(zid);
 
-	if (ZEND_SIZE_T_INT_OVFL(ZSTR_LEN(str))) {
+	if (!ZEND_IN_RANGE_OF(ZSTR_LEN(str), int)) {
 		RETURN_FALSE;
 	}
 
@@ -3095,7 +3100,7 @@ PHP_FUNCTION(curl_unescape)
 
 	ch = Z_CURL_P(zid);
 
-	if (ZEND_SIZE_T_INT_OVFL(ZSTR_LEN(str))) {
+	if (!ZEND_IN_RANGE_OF(ZSTR_LEN(str), int)) {
 		RETURN_FALSE;
 	}
 

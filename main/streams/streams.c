@@ -34,7 +34,7 @@
 #include "php_streams_int.h"
 
 /* {{{ resource and registration code */
-/* Global wrapper hash, copied to FG(stream_wrappers) on registration of volatile wrapper */
+/* Global wrapper hash, copied to PG(stream_wrappers) on registration of volatile wrapper */
 static HashTable url_stream_wrappers_hash;
 static int le_stream = -1; /* true global */
 static int le_pstream = -1; /* true global */
@@ -57,7 +57,7 @@ PHPAPI int php_file_le_stream_filter(void)
 
 PHPAPI HashTable *php_stream_get_url_stream_wrappers_hash(void)
 {
-	return (FG(stream_wrappers) ? FG(stream_wrappers) : &url_stream_wrappers_hash);
+	return (PG(stream_wrappers) ? PG(stream_wrappers) : &url_stream_wrappers_hash);
 }
 
 PHPAPI HashTable *php_stream_get_url_stream_wrappers_hash_global(void)
@@ -65,13 +65,13 @@ PHPAPI HashTable *php_stream_get_url_stream_wrappers_hash_global(void)
 	return &url_stream_wrappers_hash;
 }
 
-static int forget_persistent_resource_id_numbers(zval *el)
+static void forget_persistent_resource_id_numbers(zval *el)
 {
 	php_stream *stream;
 	zend_resource *rsrc = Z_RES_P(el);
 
 	if (rsrc->type != le_pstream) {
-		return 0;
+		return;
 	}
 
 	stream = (php_stream*)rsrc->ptr;
@@ -83,8 +83,6 @@ fprintf(stderr, "forget_persistent: %s:%p\n", stream->ops->label, stream);
 	/* Request resources have been destroyed; clear their stale pointers. */
 	stream->res = NULL;
 	stream->ctx = NULL;
-
-	return 0;
 }
 
 ZEND_MODULE_POST_ZEND_DEACTIVATE_D(streams)
@@ -107,7 +105,7 @@ PHPAPI php_stream *php_stream_encloses(php_stream *enclosing, php_stream *enclos
 	return orig;
 }
 
-PHPAPI int php_stream_from_persistent_id(const char *persistent_id, php_stream **stream)
+PHPAPI php_stream_persistent_status php_stream_from_persistent_id(const char *persistent_id, php_stream **stream)
 {
 	zend_resource *le;
 
@@ -186,7 +184,7 @@ fprintf(stderr, "stream_alloc: %s:%p persistent=%s\n", ops->label, ret, persiste
 	ret->open_lineno = __zend_orig_lineno ? __zend_orig_lineno : __zend_lineno;
 #endif
 
-	if (FG(auto_detect_line_endings)) {
+	if (PG(auto_detect_line_endings)) {
 		ret->flags |= PHP_STREAM_FLAG_DETECT_EOL;
 	}
 
@@ -252,8 +250,8 @@ static int php_stream_flush_ex(php_stream *stream, bool closing);
 PHPAPI int php_stream_free(php_stream *stream, int close_options) /* {{{ */
 {
 	int ret = 1;
-	int preserve_handle = close_options & PHP_STREAM_FREE_PRESERVE_HANDLE ? 1 : 0;
-	int release_cast = 1;
+	bool preserve_handle = (close_options & PHP_STREAM_FREE_PRESERVE_HANDLE) ? true : false;
+	bool release_cast = true;
 	php_stream_context *context;
 
 	/* During shutdown resources may be released before other resources still holding them.
@@ -272,7 +270,7 @@ PHPAPI int php_stream_free(php_stream *stream, int close_options) /* {{{ */
 
 	if ((stream->flags & PHP_STREAM_FLAG_NO_CLOSE) ||
 			((stream->flags & PHP_STREAM_FLAG_NO_RSCR_DTOR_CLOSE) && (close_options & PHP_STREAM_FREE_RSRC_DTOR))) {
-		preserve_handle = 1;
+		preserve_handle = true;
 	}
 
 #if STREAM_DEBUG
@@ -324,7 +322,7 @@ PHPAPI int php_stream_free(php_stream *stream, int close_options) /* {{{ */
 			return 0;
 		}
 		/* otherwise, make sure that we don't close the FILE* from a cast */
-		release_cast = 0;
+		release_cast = false;
 	}
 
 #if STREAM_DEBUG
@@ -374,7 +372,7 @@ fprintf(stderr, "stream_free: %s:%p[%s] preserve_handle=%d release_cast=%d remov
 			php_io_poll_stream_notify_close(stream);
 		}
 
-		ret = stream->ops->close(stream, preserve_handle ? 0 : 1);
+		ret = stream->ops->close(stream, !preserve_handle);
 		if (!ret) {
 			ret = flush_result;
 		}
@@ -868,11 +866,11 @@ PHPAPI char *php_stream_get_line(php_stream *stream, char *buf, size_t maxlen,
 	size_t avail = 0;
 	size_t current_buf_size = 0;
 	size_t total_copied = 0;
-	int grow_mode = 0;
+	bool grow_mode = false;
 	char *bufstart = buf;
 
 	if (buf == NULL) {
-		grow_mode = 1;
+		grow_mode = true;
 	} else if (maxlen == 0) {
 		return NULL;
 	}
@@ -897,14 +895,14 @@ PHPAPI char *php_stream_get_line(php_stream *stream, char *buf, size_t maxlen,
 			size_t cpysz = 0;
 			char *readptr;
 			const char *eol;
-			int done = 0;
+			bool done = false;
 
 			readptr = (char*)stream->readbuf + stream->readpos;
 			eol = php_stream_locate_eol(stream, NULL);
 
 			if (eol) {
 				cpysz = eol - readptr + 1;
-				done = 1;
+				done = true;
 			} else {
 				cpysz = avail;
 			}
@@ -926,7 +924,7 @@ PHPAPI char *php_stream_get_line(php_stream *stream, char *buf, size_t maxlen,
 			} else {
 				if (cpysz >= maxlen - 1) {
 					cpysz = maxlen - 1;
-					done = 1;
+					done = true;
 				}
 			}
 
@@ -1806,23 +1804,23 @@ static void stream_resource_persistent_dtor(zend_resource *rsrc)
 
 void php_shutdown_stream_hashes(void)
 {
-	FG(user_stream_current_filename) = NULL;
-	if (FG(stream_wrappers)) {
-		zend_hash_destroy(FG(stream_wrappers));
-		efree(FG(stream_wrappers));
-		FG(stream_wrappers) = NULL;
+	PG(user_stream_current_filename) = NULL;
+	if (PG(stream_wrappers)) {
+		zend_hash_destroy(PG(stream_wrappers));
+		efree(PG(stream_wrappers));
+		PG(stream_wrappers) = NULL;
 	}
 
-	if (FG(stream_filters)) {
-		zend_hash_destroy(FG(stream_filters));
-		efree(FG(stream_filters));
-		FG(stream_filters) = NULL;
+	if (PG(stream_filters)) {
+		zend_hash_destroy(PG(stream_filters));
+		efree(PG(stream_filters));
+		PG(stream_filters) = NULL;
 	}
 
-	if (FG(wrapper_logged_errors)) {
-		zend_hash_destroy(FG(wrapper_logged_errors));
-		efree(FG(wrapper_logged_errors));
-		FG(wrapper_logged_errors) = NULL;
+	if (PG(wrapper_logged_errors)) {
+		zend_hash_destroy(PG(wrapper_logged_errors));
+		efree(PG(wrapper_logged_errors));
+		PG(wrapper_logged_errors) = NULL;
 	}
 
 	php_stream_error_state_cleanup();
@@ -1896,9 +1894,9 @@ PHPAPI zend_result php_unregister_url_stream_wrapper(const char *protocol)
 
 static void clone_wrapper_hash(void)
 {
-	ALLOC_HASHTABLE(FG(stream_wrappers));
-	zend_hash_init(FG(stream_wrappers), zend_hash_num_elements(&url_stream_wrappers_hash), NULL, NULL, 0);
-	zend_hash_copy(FG(stream_wrappers), &url_stream_wrappers_hash, NULL);
+	ALLOC_HASHTABLE(PG(stream_wrappers));
+	zend_hash_init(PG(stream_wrappers), zend_hash_num_elements(&url_stream_wrappers_hash), NULL, NULL, 0);
+	zend_hash_copy(PG(stream_wrappers), &url_stream_wrappers_hash, NULL);
 }
 
 /* API for registering VOLATILE wrappers */
@@ -1908,27 +1906,27 @@ PHPAPI zend_result php_register_url_stream_wrapper_volatile(zend_string *protoco
 		return FAILURE;
 	}
 
-	if (!FG(stream_wrappers)) {
+	if (!PG(stream_wrappers)) {
 		clone_wrapper_hash();
 	}
 
-	return zend_hash_add_ptr(FG(stream_wrappers), protocol, wrapper) ? SUCCESS : FAILURE;
+	return zend_hash_add_ptr(PG(stream_wrappers), protocol, wrapper) ? SUCCESS : FAILURE;
 }
 
 PHPAPI zend_result php_unregister_url_stream_wrapper_volatile(zend_string *protocol)
 {
-	if (!FG(stream_wrappers)) {
+	if (!PG(stream_wrappers)) {
 		clone_wrapper_hash();
 	}
 
-	return zend_hash_del(FG(stream_wrappers), protocol);
+	return zend_hash_del(PG(stream_wrappers), protocol);
 }
 /* }}} */
 
 /* {{{ php_stream_locate_url_wrapper */
 PHPAPI php_stream_wrapper *php_stream_locate_url_wrapper(const char *path, const char **path_for_open, int options)
 {
-	const HashTable *wrapper_hash = (FG(stream_wrappers) ? FG(stream_wrappers) : &url_stream_wrappers_hash);
+	const HashTable *wrapper_hash = (PG(stream_wrappers) ? PG(stream_wrappers) : &url_stream_wrappers_hash);
 	php_stream_wrapper *wrapper = NULL;
 	const char *p, *protocol = NULL;
 	size_t n = 0;
@@ -2014,7 +2012,7 @@ PHPAPI php_stream_wrapper *php_stream_locate_url_wrapper(const char *path, const
 			return NULL;
 		}
 
-		if (FG(stream_wrappers)) {
+		if (PG(stream_wrappers)) {
 		/* The file:// wrapper may have been disabled/overridden */
 
 			if (wrapper) {

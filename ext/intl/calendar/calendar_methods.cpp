@@ -50,7 +50,7 @@ using icu::Locale;
 	}
 
 #define ZEND_VALUE_ERROR_OUT_OF_BOUND_VALUE(argument, zpp_arg_position) \
-	if (UNEXPECTED(argument < INT32_MIN || argument > INT32_MAX)) { \
+	if (!ZEND_IN_RANGE_OF(argument, int32_t)) { \
 		zend_argument_value_error(hasThis() ? ((zpp_arg_position)-1) : zpp_arg_position, \
 			"must be between %d and %d", INT32_MIN, INT32_MAX); \
 		RETURN_THROWS(); \
@@ -260,6 +260,12 @@ U_CFUNC PHP_FUNCTION(intlcal_set_time)
 	}
 
 	CALENDAR_METHOD_FETCH_OBJECT;
+
+	if (UNEXPECTED(!zend_finite(time_arg))) {
+		intl_errors_set(CALENDAR_ERROR_P(co), U_ILLEGAL_ARGUMENT_ERROR,
+			"Timestamp must be finite");
+		RETURN_FALSE;
+	}
 
 	co->ucal->setTime((UDate)time_arg, CALENDAR_ERROR_CODE(co));
 	INTL_METHOD_CHECK_STATUS(co, "Call to underlying method failed");

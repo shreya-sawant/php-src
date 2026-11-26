@@ -145,7 +145,6 @@ typedef struct _php_ps_globals {
 	bool set_handler;     /* state if session module i setting handler or not */
 	zend_string *session_started_filename;
 	uint32_t session_started_lineno;
-	int module_number;
 	php_random_status_state_pcgoneseq128xslrr64 random_state;
 	php_random_algo_with_state random;
 	zend_long gc_probability;
@@ -249,8 +248,8 @@ PHPAPI php_session_status php_get_session_status(void);
 PHPAPI const ps_module *_php_find_ps_module(const char *name);
 PHPAPI const ps_serializer *_php_find_ps_serializer(const char *name);
 
-PHPAPI zend_result php_session_valid_key(const char *key);
-zend_result php_session_valid_key_ex(const zend_string *key);
+ZEND_ATTRIBUTE_DEPRECATED PHPAPI zend_result php_session_valid_key(const char *key);
+PHPAPI zend_result php_session_valid_key_ex(const zend_string *key);
 PHPAPI zend_result php_session_reset_id(void);
 
 /* Do not use a return statement in `code` because that may leak memory.

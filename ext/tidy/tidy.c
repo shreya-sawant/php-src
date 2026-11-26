@@ -279,7 +279,7 @@ static void php_tidy_quick_repair(INTERNAL_FUNCTION_PARAMETERS, bool is_file)
 		data = arg1;
 	}
 
-	if (ZEND_SIZE_T_UINT_OVFL(ZSTR_LEN(data))) {
+	if (!ZEND_IN_RANGE_OF(ZSTR_LEN(data), unsigned int)) {
 		if (is_file) {
 			zend_string_release_ex(data, false);
 			zend_argument_value_error(1, "File content is too long");
@@ -768,7 +768,7 @@ static bool php_tidy_set_tidy_opt(TidyDoc doc, const char *optname, zval *value,
 		const zend_string *str = zval_get_tmp_string(value, &tmp_str);
 		const bool result = tidyOptSetValue(doc, tidyOptGetId(opt), ZSTR_VAL(str));
 		if (UNEXPECTED(!result)) {
-			zend_argument_type_error(arg, "option \"%s\" does not accept \"%s\" as a value", optname, ZSTR_VAL(str));
+			zend_argument_type_error(arg, "option \"%s\" does not accept \"%pS\" as a value", optname, str);
 		}
 		zend_tmp_string_release(tmp_str);
 		return result;
@@ -792,7 +792,7 @@ static bool php_tidy_set_tidy_opt(TidyDoc doc, const char *optname, zval *value,
 			} else {
 				result = tidyOptSetValue(doc, tidyOptGetId(opt), ZSTR_VAL(str));
 				if (UNEXPECTED(!result)) {
-					zend_argument_type_error(arg, "option \"%s\" does not accept \"%s\" as a value", optname, ZSTR_VAL(str));
+					zend_argument_type_error(arg, "option \"%s\" does not accept \"%pS\" as a value", optname, str);
 				}
 			}
 			zend_tmp_string_release(tmp_str);
@@ -833,7 +833,7 @@ static zend_result php_tidy_parse_string(PHPTidyObj *obj, const zend_string *str
 {
 	TidyBuffer buf;
 
-	ZEND_ASSERT(!ZEND_SIZE_T_UINT_OVFL(ZSTR_LEN(string)));
+	ZEND_ASSERT(ZEND_IN_RANGE_OF(ZSTR_LEN(string), unsigned int));
 
 	if (enc) {
 		if (tidySetCharEncoding(obj->ptdoc->doc, enc) < 0) {
@@ -992,7 +992,7 @@ static zend_result php_tidy_output_handler(void **nothing, php_output_context *o
 	TidyBuffer inbuf, outbuf, errbuf;
 
 	if (TG(clean_output) && (output_context->op & PHP_OUTPUT_HANDLER_START) && (output_context->op & PHP_OUTPUT_HANDLER_FINAL)) {
-		if (ZEND_SIZE_T_UINT_OVFL(output_context->in.used)) {
+		if (!ZEND_IN_RANGE_OF(output_context->in.used, unsigned int)) {
 			php_error_docref(NULL, E_WARNING, "Input string is too long");
 			return status;
 		}
@@ -1043,7 +1043,7 @@ PHP_FUNCTION(tidy_parse_string)
 		Z_PARAM_STRING_OR_NULL(enc, enc_len)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if (ZEND_SIZE_T_UINT_OVFL(ZSTR_LEN(input))) {
+	if (!ZEND_IN_RANGE_OF(ZSTR_LEN(input), unsigned int)) {
 		zend_argument_value_error(1, "is too long");
 		RETURN_THROWS();
 	}
@@ -1106,11 +1106,11 @@ PHP_FUNCTION(tidy_parse_file)
 	ZEND_PARSE_PARAMETERS_END();
 
 	if (!(contents = php_tidy_file_to_mem(inputfile, use_include_path))) {
-		php_error_docref(NULL, E_WARNING, "Cannot load \"%s\" into memory%s", ZSTR_VAL(inputfile), (use_include_path) ? " (using include path)" : "");
+		php_error_docref(NULL, E_WARNING, "Cannot load \"%pS\" into memory%s", inputfile, (use_include_path) ? " (using include path)" : "");
 		RETURN_FALSE;
 	}
 
-	if (ZEND_SIZE_T_UINT_OVFL(ZSTR_LEN(contents))) {
+	if (!ZEND_IN_RANGE_OF(ZSTR_LEN(contents), unsigned int)) {
 		zend_string_release_ex(contents, 0);
 		zend_value_error("File content is too long");
 		RETURN_THROWS();
@@ -1386,11 +1386,11 @@ PHP_METHOD(tidy, __construct)
 
 	if (inputfile) {
 		if (!(contents = php_tidy_file_to_mem(inputfile, use_include_path))) {
-			zend_throw_error(zend_ce_exception, "Cannot load \"%s\" into memory%s", ZSTR_VAL(inputfile), (use_include_path) ? " (using include path)" : "");
+			zend_throw_error(zend_ce_exception, "Cannot load \"%pS\" into memory%s", inputfile, (use_include_path) ? " (using include path)" : "");
 			RETURN_THROWS();
 		}
 
-		if (ZEND_SIZE_T_UINT_OVFL(ZSTR_LEN(contents))) {
+		if (!ZEND_IN_RANGE_OF(ZSTR_LEN(contents), unsigned int)) {
 			zend_string_release_ex(contents, 0);
 			zend_value_error("File content is too long");
 			RETURN_THROWS();
@@ -1431,11 +1431,11 @@ PHP_METHOD(tidy, parseFile)
 	obj = Z_TIDY_P(ZEND_THIS);
 
 	if (!(contents = php_tidy_file_to_mem(inputfile, use_include_path))) {
-		php_error_docref(NULL, E_WARNING, "Cannot load \"%s\" into memory%s", ZSTR_VAL(inputfile), (use_include_path) ? " (using include path)" : "");
+		php_error_docref(NULL, E_WARNING, "Cannot load \"%pS\" into memory%s", inputfile, (use_include_path) ? " (using include path)" : "");
 		RETURN_FALSE;
 	}
 
-	if (ZEND_SIZE_T_UINT_OVFL(ZSTR_LEN(contents))) {
+	if (!ZEND_IN_RANGE_OF(ZSTR_LEN(contents), unsigned int)) {
 		zend_string_release_ex(contents, 0);
 		zend_value_error("File content is too long");
 		RETURN_THROWS();
@@ -1462,7 +1462,7 @@ PHP_METHOD(tidy, parseString)
 		Z_PARAM_STRING_OR_NULL(enc, enc_len)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if (ZEND_SIZE_T_UINT_OVFL(ZSTR_LEN(input))) {
+	if (!ZEND_IN_RANGE_OF(ZSTR_LEN(input), unsigned int)) {
 		zend_argument_value_error(1, "is too long");
 		RETURN_THROWS();
 	}

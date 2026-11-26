@@ -24,9 +24,7 @@
 #include "php.h"
 
 #include "php_network.h"
-#include "ext/standard/file.h"
 #include "ext/standard/info.h"
-#include "php_ini.h"
 #ifdef PHP_WIN32
 # include "windows_common.h"
 # include <windows.h>
@@ -534,6 +532,8 @@ static PHP_RSHUTDOWN_FUNCTION(sockets)
 		SOCKETS_G(strerror_buf) = NULL;
 	}
 
+	SOCKETS_G(last_error) = 0;
+
 	return SUCCESS;
 }
 /* }}} */
@@ -714,7 +714,7 @@ PHP_FUNCTION(socket_create_listen)
 		Z_PARAM_LONG(backlog)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if (port < 0 || port > USHRT_MAX) {
+	if (!ZEND_IN_RANGE_OF(port, unsigned short)) {
 		zend_argument_value_error(1, "must be between 0 and %u", USHRT_MAX);
 		RETURN_THROWS();
 	}
@@ -1305,7 +1305,7 @@ PHP_FUNCTION(socket_strerror)
 		Z_PARAM_LONG(arg1)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if (ZEND_LONG_EXCEEDS_INT(arg1)) {
+	if (!ZEND_IN_RANGE_OF(arg1, int)) {
 		zend_argument_value_error(1, "must be between %d and %d", INT_MIN, INT_MAX);
 		RETURN_THROWS();
 	}
@@ -1335,7 +1335,7 @@ PHP_FUNCTION(socket_bind)
 	php_sock = Z_SOCKET_P(arg1);
 	ENSURE_SOCKET_VALID(php_sock);
 
-	if (objint < 0 || objint > USHRT_MAX) {
+	if (!ZEND_IN_RANGE_OF(objint, unsigned short)) {
 		zend_argument_value_error(3, "must be between 0 and %u", USHRT_MAX);
 		RETURN_THROWS();
 	}
@@ -1732,7 +1732,7 @@ PHP_FUNCTION(socket_sendto)
 #ifdef AF_PACKET
 	if (php_sock->type != AF_PACKET) {
 #endif
-		if (port < 0 || port > USHRT_MAX) {
+		if (!ZEND_IN_RANGE_OF(port, unsigned short)) {
 			zend_argument_value_error(6, "must be between 0 and %u", USHRT_MAX);
 			RETURN_THROWS();
 		}
@@ -2167,7 +2167,7 @@ PHP_FUNCTION(socket_set_option)
 			zend_long timeout = zval_get_long(arg4);
 
 			// TCP_USER_TIMEOUT unsigned int
-			if (timeout < 0 || timeout > UINT_MAX) {
+			if (!ZEND_IN_RANGE_OF(timeout, unsigned int)) {
 				zend_argument_value_error(4, "must be between 0 and %u", UINT_MAX);
 				RETURN_THROWS();
 			}
@@ -2223,12 +2223,12 @@ PHP_FUNCTION(socket_set_option)
 			zend_long val_linger = zval_get_long(l_linger);
 			zend_release_properties(opt_props);
 
-			if (val_lonoff < 0 || val_lonoff > USHRT_MAX) {
+			if (!ZEND_IN_RANGE_OF(val_lonoff, unsigned short)) {
 				zend_argument_value_error(4, "\"%s\" must be between 0 and %u", l_onoff_key, USHRT_MAX);
 				RETURN_THROWS();
 			}
 
-			if (val_linger < 0 || val_linger > USHRT_MAX) {
+			if (!ZEND_IN_RANGE_OF(val_linger, unsigned short)) {
 				zend_argument_value_error(4, "\"%s\" must be between 0 and %u", l_linger_key, USHRT_MAX);
 				RETURN_THROWS();
 			}
@@ -2407,7 +2407,7 @@ PHP_FUNCTION(socket_set_option)
 			ov = zval_get_long(arg4);
 
 			// UDP segmentation offload maximum size or 0 to disable it
-			if (ov < 0 || ov > USHRT_MAX) {
+			if (!ZEND_IN_RANGE_OF(ov, unsigned short)) {
 				zend_argument_value_error(4, "must be between 0 and %u", USHRT_MAX);
 				RETURN_THROWS();
 			}
@@ -2667,7 +2667,7 @@ PHP_FUNCTION(socket_import_stream)
 	ZEND_PARSE_PARAMETERS_START(1, 1)
 		Z_PARAM_RESOURCE(zstream)
 	ZEND_PARSE_PARAMETERS_END();
-	php_stream_from_zval(stream, zstream);
+	php_stream_from_res(stream, Z_RES_P(zstream));
 
 	if (php_stream_cast(stream, PHP_STREAM_AS_SOCKETD, (void**)&socket, 1) == FAILURE) {
 		/* error supposedly already shown */
@@ -2789,7 +2789,7 @@ PHP_FUNCTION(socket_export_stream)
 	stream_data = (php_netstream_data_t *) stream->abstract;
 	stream_data->socket = socket->bsd_socket;
 	stream_data->is_blocked = socket->blocking;
-	stream_data->timeout.tv_sec = FG(default_socket_timeout);
+	stream_data->timeout.tv_sec = PG(default_socket_timeout);
 	stream_data->timeout.tv_usec = 0;
 
 	php_stream_to_zval(stream, &socket->zstream);
@@ -2825,7 +2825,7 @@ PHP_FUNCTION(socket_addrinfo_lookup)
 #  endif
 #endif
 
-	if (zhints) {
+	if (zhints && zend_hash_num_elements(Z_ARRVAL_P(zhints)) > 0) {
 		if (UNEXPECTED(HT_IS_PACKED(Z_ARRVAL_P(zhints)))) {
 			zend_argument_value_error(3, "must only contain array keys \"ai_flags\", \"ai_socktype\", "
 					"\"ai_protocol\", or \"ai_family\"");

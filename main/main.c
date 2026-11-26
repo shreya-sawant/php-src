@@ -60,7 +60,7 @@
 #ifdef PHP_WIN32
 #include <io.h>
 #include "win32/php_registry.h"
-#include "ext/standard/flock_compat.h"
+#include "flock_compat.h"
 #endif
 #include "Zend/zend_builtin_functions.h"
 #include "Zend/zend_exceptions.h"
@@ -97,7 +97,8 @@ PHPAPI int (*php_register_internal_extensions_func)(void) = php_register_interna
 php_core_globals core_globals;
 #else
 PHPAPI int core_globals_id;
-PHPAPI size_t core_globals_offset;
+ZEND_TLS_API TSRM_TLS TSRM_TLS_MODEL_ATTR php_core_globals core_globals;
+static void *core_globals_tls_addr(void) { return &core_globals; }
 #endif
 
 #define SAFE_FILENAME(f) ((f)?(f):"-")
@@ -798,6 +799,15 @@ static PHP_INI_MH(OnChangeMailForceExtra)
 }
 /* }}} */
 
+static PHP_INI_MH(OnUpdateAutoDetectLineEndings)
+{
+	if (zend_ini_parse_bool(new_value)) {
+		zend_error(E_DEPRECATED, "auto_detect_line_endings is deprecated");
+	}
+	return OnUpdateBool(entry, new_value, mh_arg1, mh_arg2, mh_arg3, stage);
+}
+
+
 /* defined in browscap.c */
 PHP_INI_MH(OnChangeBrowscap);
 
@@ -920,6 +930,8 @@ PHP_INI_BEGIN()
 	STD_PHP_INI_ENTRY("syslog.facility",		"LOG_USER",		PHP_INI_SYSTEM,		OnSetFacility,		syslog_facility,	php_core_globals,		core_globals)
 	STD_PHP_INI_ENTRY("syslog.ident",		"php",			PHP_INI_SYSTEM,		OnUpdateString,		syslog_ident,		php_core_globals,		core_globals)
 	STD_PHP_INI_ENTRY("syslog.filter",		"no-ctrl",		PHP_INI_ALL,		OnSetLogFilter,		syslog_filter,		php_core_globals, 		core_globals)
+	STD_PHP_INI_ENTRY("default_socket_timeout", "60", PHP_INI_ALL, OnUpdateLong, default_socket_timeout, php_core_globals, core_globals)
+	STD_PHP_INI_BOOLEAN("auto_detect_line_endings", "0", PHP_INI_ALL, OnUpdateAutoDetectLineEndings, auto_detect_line_endings, php_core_globals, core_globals)
 PHP_INI_END()
 /* }}} */
 
@@ -1005,15 +1017,7 @@ PHPAPI ZEND_COLD void php_log_err_with_severity(const char *log_message, int sys
 			zend_string *error_time_str;
 
 			time(&error_time);
-#ifdef ZTS
-			if (!php_during_module_startup()) {
-				error_time_str = php_format_date("d-M-Y H:i:s e", 13, error_time, 1);
-			} else {
-				error_time_str = php_format_date("d-M-Y H:i:s e", 13, error_time, 0);
-			}
-#else
-			error_time_str = php_format_date("d-M-Y H:i:s e", 13, error_time, 1);
-#endif
+			error_time_str = php_format_date("d-M-Y H:i:s e", 13, error_time, PG(modules_activated) && EG(active));
 			len = spprintf(&tmp, 0, "[%s] %s%s", ZSTR_VAL(error_time_str), log_message, PHP_EOL);
 #ifdef PHP_WIN32
 			php_flock(fd, LOCK_EX);
@@ -1387,7 +1391,7 @@ static ZEND_COLD void php_error_cb(int orig_type, zend_string *error_filename, c
 		}
 	}
 
-	if (!Z_ISUNDEF(EG(last_fatal_error_backtrace))) {
+	if (EG(active) && !Z_ISUNDEF(EG(last_fatal_error_backtrace))) {
 		backtrace = zend_trace_to_string(Z_ARRVAL(EG(last_fatal_error_backtrace)), /* include_main */ true);
 	}
 
@@ -1898,6 +1902,12 @@ zend_result php_request_startup(void)
 	signal(SIGCHLD, sigchld_handler);
 #endif
 
+	/* Default to global wrappers only */
+	PG(stream_wrappers) = NULL;
+
+	/* Default to global filters only */
+	PG(stream_filters) = NULL;
+
 	zend_try {
 		PG(in_error_log) = 0;
 		PG(during_request_startup) = 1;
@@ -2241,7 +2251,7 @@ zend_result php_module_startup(sapi_module_struct *sf, zend_module_entry *additi
 	php_output_startup();
 
 #ifdef ZTS
-	ts_allocate_fast_id(&core_globals_id, &core_globals_offset, sizeof(php_core_globals), (ts_allocate_ctor) core_globals_ctor, (ts_allocate_dtor) core_globals_dtor);
+	ts_allocate_tls_id(&core_globals_id, core_globals_tls_addr, sizeof(php_core_globals), (ts_allocate_ctor) core_globals_ctor, (ts_allocate_dtor) core_globals_dtor);
 #ifdef PHP_WIN32
 	ts_allocate_id(&php_win32_core_globals_id, sizeof(php_win32_core_globals), (ts_allocate_ctor) php_win32_core_globals_ctor, (ts_allocate_dtor) php_win32_core_globals_dtor);
 #endif
@@ -2821,32 +2831,9 @@ PHPAPI zend_result php_lint_script(zend_file_handle *file)
 /* }}} */
 
 #ifdef ZTS
-/* {{{ php_reserve_tsrm_memory */
-PHPAPI void php_reserve_tsrm_memory(void)
-{
-	/* CG/EG/GC globals live in native __thread storage and need no
-	 * reserved TSRM space. */
-	tsrm_reserve(
-		TSRM_ALIGNED_SIZE(sizeof(zend_ini_scanner_globals)) +
-		TSRM_ALIGNED_SIZE(sizeof(virtual_cwd_globals)) +
-#ifdef ZEND_SIGNALS
-		TSRM_ALIGNED_SIZE(sizeof(zend_signal_globals_t)) +
-#endif
-		TSRM_ALIGNED_SIZE(sizeof(php_core_globals)) +
-		TSRM_ALIGNED_SIZE(sizeof(sapi_globals_struct)) +
-		TSRM_ALIGNED_SIZE(sizeof(zend_accel_globals)) +
-#ifdef HAVE_JIT
-		TSRM_ALIGNED_SIZE(sizeof(zend_jit_globals)) +
-#endif
-		0
-	);
-}
-/* }}} */
-
 PHPAPI bool php_tsrm_startup_ex(int expected_threads)
 {
 	bool ret = tsrm_startup(expected_threads, 1, 0, NULL);
-	php_reserve_tsrm_memory();
 	(void)ts_resource(0);
 	return ret;
 }

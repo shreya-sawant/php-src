@@ -58,6 +58,7 @@ ZEND_TLS_API TSRM_TLS TSRM_TLS_MODEL_ATTR zend_tsrm_ls_cache _tsrm_ls_cache = {0
 static void *executor_globals_tls_addr(void) { return &_tsrm_ls_cache.eg; }
 static void *compiler_globals_tls_addr(void) { return &_tsrm_ls_cache.cg; }
 static void *language_scanner_globals_tls_addr(void) { return &language_scanner_globals; }
+static void *ini_scanner_globals_tls_addr(void) { return &ini_scanner_globals; }
 static HashTable *global_function_table = NULL;
 static HashTable *global_class_table = NULL;
 static HashTable *global_constants_table = NULL;
@@ -98,6 +99,7 @@ ZEND_API zend_string *(*zend_resolve_path)(zend_string *filename);
 ZEND_API zend_result (*zend_post_startup_cb)(void) = NULL;
 ZEND_API void (*zend_post_shutdown_cb)(void) = NULL;
 ZEND_API void (*zend_accel_schedule_restart_hook)(int reason) = NULL;
+ZEND_API void (*zend_accel_restart_hook)(int reason) = NULL;
 ZEND_ATTRIBUTE_NONNULL ZEND_API zend_result (*zend_random_bytes)(void *bytes, size_t size, char *errstr, size_t errstr_size) = NULL;
 ZEND_ATTRIBUTE_NONNULL ZEND_API void (*zend_random_bytes_insecure)(zend_random_bytes_insecure_state *state, void *bytes, size_t size) = NULL;
 
@@ -1034,7 +1036,7 @@ void zend_startup(zend_utility_functions *utility_functions) /* {{{ */
 	ts_allocate_tls_id(&compiler_globals_id, compiler_globals_tls_addr, sizeof(zend_compiler_globals), (ts_allocate_ctor) compiler_globals_ctor, (ts_allocate_dtor) compiler_globals_dtor);
 	ts_allocate_tls_id(&executor_globals_id, executor_globals_tls_addr, sizeof(zend_executor_globals), (ts_allocate_ctor) executor_globals_ctor, (ts_allocate_dtor) executor_globals_dtor);
 	ts_allocate_tls_id(&language_scanner_globals_id, language_scanner_globals_tls_addr, sizeof(zend_php_scanner_globals), (ts_allocate_ctor) php_scanner_globals_ctor, NULL);
-	ts_allocate_fast_id(&ini_scanner_globals_id, &ini_scanner_globals_offset, sizeof(zend_ini_scanner_globals), (ts_allocate_ctor) ini_scanner_globals_ctor, NULL);
+	ts_allocate_tls_id(&ini_scanner_globals_id, ini_scanner_globals_tls_addr, sizeof(zend_ini_scanner_globals), (ts_allocate_ctor) ini_scanner_globals_ctor, NULL);
 	compiler_globals = ts_resource(compiler_globals_id);
 	executor_globals = ts_resource(executor_globals_id);
 
@@ -1513,7 +1515,9 @@ ZEND_API ZEND_COLD void zend_error_zstr_at(
 	}
 
 	// Always clear the last backtrace.
-	zval_ptr_dtor(&EG(last_fatal_error_backtrace));
+	if (EG(active)) {
+		zval_ptr_dtor(&EG(last_fatal_error_backtrace));
+	}
 	ZVAL_UNDEF(&EG(last_fatal_error_backtrace));
 
 	/* Report about uncaught exception in case of fatal errors */
@@ -1536,7 +1540,11 @@ ZEND_API ZEND_COLD void zend_error_zstr_at(
 			}
 		}
 	} else if (EG(fatal_error_backtrace_on) && (type & E_FATAL_ERRORS)) {
-		zend_fetch_debug_backtrace(&EG(last_fatal_error_backtrace), 0, EG(exception_ignore_args) ? DEBUG_BACKTRACE_IGNORE_ARGS : 0, 0);
+		// EG(last_fatal_error_backtrace) is useless when the executor is
+		// inactive, and setting it at this point would leak.
+		if (EG(active)) {
+			zend_fetch_debug_backtrace(&EG(last_fatal_error_backtrace), false, EG(exception_ignore_args) ? DEBUG_BACKTRACE_IGNORE_ARGS : 0, 0);
+		}
 	}
 
 	zend_observer_error_notify(type, error_filename, error_lineno, message);

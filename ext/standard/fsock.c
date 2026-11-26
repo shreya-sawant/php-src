@@ -55,7 +55,7 @@ static void php_fsockopen_stream(INTERNAL_FUNCTION_PARAMETERS, int persistent)
 	struct timeval tv;
 	char *hashkey = NULL;
 	php_stream *stream = NULL;
-	int err;
+	int err = 0;
 	char *hostname = NULL;
 	size_t hostname_len;
 	zend_string *errstr = NULL;
@@ -72,7 +72,7 @@ static void php_fsockopen_stream(INTERNAL_FUNCTION_PARAMETERS, int persistent)
 	RETVAL_FALSE;
 
 	if (timeout_is_null) {
-		timeout = (double)FG(default_socket_timeout);
+		timeout = (double)PG(default_socket_timeout);
 	}
 
 	if (persistent) {

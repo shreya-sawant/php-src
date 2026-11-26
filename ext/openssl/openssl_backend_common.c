@@ -384,7 +384,7 @@ int php_openssl_parse_config(struct php_x509_request * req, zval * optional_args
 		&& Z_TYPE_P(item) == IS_STRING) {
 		req->curve_name = OBJ_sn2nid(Z_STRVAL_P(item));
 		if (req->curve_name == NID_undef) {
-			php_error_docref(NULL, E_WARNING, "Unknown elliptic curve (short) name %s", Z_STRVAL_P(item));
+			php_error_docref(NULL, E_WARNING, "Unknown elliptic curve (short) name %pS", Z_STR_P(item));
 			return FAILURE;
 		}
 	}
@@ -698,6 +698,7 @@ STACK_OF(X509) *php_openssl_load_all_certs_from_file(
 	BIO *in=NULL;
 	X509_INFO *xi;
 	char cert_path[MAXPATHLEN];
+	int i;
 
 	if (!php_openssl_check_path(cert_file, cert_file_len, cert_path, arg_num)) {
 		goto end;
@@ -716,29 +717,32 @@ STACK_OF(X509) *php_openssl_load_all_certs_from_file(
 		goto end;
 	}
 
-	if(!(stack = sk_X509_new_reserve(NULL, sk_X509_INFO_num(sk)))) {
+	if(!(stack = sk_X509_new_null())) {
 		php_openssl_store_errors();
 		goto end;
 	}
 
 	/* scan over it and pull out the certs */
-	while (sk_X509_INFO_num(sk)) {
-		xi=sk_X509_INFO_shift(sk);
+	for (i = 0; i < sk_X509_INFO_num(sk); i++) {
+		xi=sk_X509_INFO_value(sk,i);
 		if (xi->x509 != NULL) {
-			sk_X509_push(stack,xi->x509);
+			if (!sk_X509_push(stack,xi->x509)) {
+				php_error_docref(NULL, E_ERROR, "Memory allocation failure");
+				goto end;
+			}
 			xi->x509=NULL;
 		}
-		X509_INFO_free(xi);
 	}
 	if (!sk_X509_num(stack)) {
 		php_error_docref(NULL, E_WARNING, "No certificates in file, %s", cert_path);
-		sk_X509_free(stack);
 		goto end;
 	}
 	ret = stack;
+	stack = NULL;
 end:
 	BIO_free(in);
-	sk_X509_INFO_free(sk);
+	sk_X509_INFO_pop_free(sk,X509_INFO_free);
+	sk_X509_pop_free(stack,X509_free);
 
 	return ret;
 }
@@ -938,10 +942,10 @@ zend_result php_openssl_csr_add_subj_entry(zval *item, X509_NAME *subj, int nid)
 	{
 		php_openssl_store_errors();
 		php_error_docref(NULL, E_WARNING,
-			"dn: add_entry_by_NID %d -> %s (failed; check error"
+			"dn: add_entry_by_NID %d -> %pS (failed; check error"
 			" queue and value of string_mask OpenSSL option "
 			"if illegal characters are reported)",
-			nid, ZSTR_VAL(str_item));
+			nid, str_item);
 		zend_string_release(str_item);
 		return FAILURE;
 	}
@@ -1006,7 +1010,7 @@ zend_result php_openssl_csr_make(struct php_x509_request * req, X509_REQ * csr, 
 						return FAILURE;
 					}
 				} else {
-					php_error_docref(NULL, E_WARNING, "dn: %s is not a recognized name", ZSTR_VAL(strindex));
+					php_error_docref(NULL, E_WARNING, "dn: %pS is not a recognized name", strindex);
 				}
 			}
 		} ZEND_HASH_FOREACH_END();
@@ -1087,13 +1091,13 @@ zend_result php_openssl_csr_make(struct php_x509_request * req, X509_REQ * csr, 
 					}
 					if (!X509_REQ_add1_attr_by_NID(csr, nid, MBSTRING_UTF8, (unsigned char*)ZSTR_VAL(str_item), (int)ZSTR_LEN(str_item))) {
 						php_openssl_store_errors();
-						php_error_docref(NULL, E_WARNING, "attributes: add_attr_by_NID %d -> %s (failed)", nid, ZSTR_VAL(str_item));
+						php_error_docref(NULL, E_WARNING, "attributes: add_attr_by_NID %d -> %pS (failed)", nid, str_item);
 						zend_string_release(str_item);
 						return FAILURE;
 					}
 					zend_string_release(str_item);
 				} else {
-					php_error_docref(NULL, E_WARNING, "attributes: %s is not a recognized attribute name", ZSTR_VAL(strindex));
+					php_error_docref(NULL, E_WARNING, "attributes: %pS is not a recognized attribute name", strindex);
 				}
 			} ZEND_HASH_FOREACH_END();
 			for (i = 0; i < sk_CONF_VALUE_num(attr_sk); i++) {
@@ -2116,7 +2120,7 @@ PHP_OPENSSL_API zend_string* php_openssl_random_pseudo_bytes(zend_long buffer_le
 		zend_argument_value_error(1, "must be greater than 0");
 		return NULL;
 	}
-	if (ZEND_LONG_INT_OVFL(buffer_length)) {
+	if (!ZEND_IN_RANGE_OF(buffer_length, int)) {
 		zend_argument_value_error(1, "must be less than or equal to %d", INT_MAX);
 		return NULL;
 	}

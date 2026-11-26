@@ -1407,7 +1407,7 @@ PHP_METHOD(SoapServer, handle)
 	FETCH_THIS_SERVICE(service);
 	SOAP_GLOBAL(soap_version) = service->version;
 
-	if (arg && ZEND_SIZE_T_INT_OVFL(arg_len)) {
+	if (arg && !ZEND_IN_RANGE_OF(arg_len, int)) {
 		soap_server_fault_en("Server", "Input string is too long");
 		SOAP_SERVER_END_CODE();
 		return;
@@ -3622,13 +3622,16 @@ ignore_header:
 		}
 	}
 
-	if (function && function->binding && function->binding->bindingType == BINDING_SOAP) {
-		sdlSoapBindingFunctionPtr fnb = (sdlSoapBindingFunctionPtr)function->bindingAttributes;
-		if (fnb->style == SOAP_RPC) {
+	/* func is NULL when the function was resolved via SOAPAction and the Body is empty */
+	if (func) {
+		if (function && function->binding && function->binding->bindingType == BINDING_SOAP) {
+			sdlSoapBindingFunctionPtr fnb = (sdlSoapBindingFunctionPtr)function->bindingAttributes;
+			if (fnb->style == SOAP_RPC) {
+				func = func->children;
+			}
+		} else {
 			func = func->children;
 		}
-	} else {
-		func = func->children;
 	}
 	deserialize_parameters(func, function, num_params, parameters);
 
@@ -4499,6 +4502,10 @@ static sdlFunctionPtr get_doc_function(sdlPtr sdl, xmlNodePtr params) /* {{{ */
 						xmlNodePtr node = params;
 
 						ZEND_HASH_FOREACH_PTR(tmp->requestParameters, param) {
+							if (node == NULL) {
+								ok = 0;
+								break;
+							}
 							if (param->element) {
 								if (strcmp(param->element->name, (char*)node->name) != 0) {
 									ok = 0;

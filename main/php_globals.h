@@ -22,9 +22,13 @@
 typedef struct _php_core_globals php_core_globals;
 
 #ifdef ZTS
-# define PG(v) ZEND_TSRMG_FAST(core_globals_offset, php_core_globals *, v)
 extern PHPAPI int core_globals_id;
-extern PHPAPI size_t core_globals_offset;
+# ifdef ZEND_TLS_DIRECT
+#  define PG(v) (core_globals.v)
+extern ZEND_TLS_API TSRM_TLS TSRM_TLS_MODEL_ATTR php_core_globals core_globals;
+# else
+#  define PG(v) ZEND_TSRMG(core_globals_id, php_core_globals *, v)
+# endif
 #else
 # define PG(v) (core_globals.v)
 extern ZEND_API struct _php_core_globals core_globals;
@@ -134,6 +138,7 @@ struct _php_core_globals {
 	bool allow_url_fopen;
 	bool enable_post_data_reading;
 	bool report_zend_debug;
+	bool auto_detect_line_endings;
 
 	int last_error_type;
 	uint32_t last_error_lineno;
@@ -170,6 +175,12 @@ struct _php_core_globals {
 	char *syslog_ident;
 	zend_long syslog_filter;
 	zend_long error_log_mode;
+	zend_long default_socket_timeout;
+	const char *user_stream_current_filename; /* for simple recursion protection */
+	HashTable *stream_wrappers;			/* per-request copy of url_stream_wrappers_hash */
+	HashTable *stream_filters;			/* per-request copy of stream_filters_hash */
+	HashTable *wrapper_logged_errors;	/* key: wrapper address; value: linked list of error entries */
+	php_stream_error_state stream_error_state;
 };
 
 

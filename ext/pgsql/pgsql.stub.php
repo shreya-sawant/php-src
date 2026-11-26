@@ -625,7 +625,6 @@ namespace {
      */
     function pg_fetch_array(PgSql\Result $result, ?int $row = null, int $mode = PGSQL_BOTH): array|false {}
 
-    /** @refcount 1 */
     function pg_fetch_object(PgSql\Result $result, ?int $row = null, string $class = "stdClass", array $constructor_args = []): object|false {}
 
     /**
@@ -636,7 +635,6 @@ namespace {
 
     /**
      * @return array<int, string|null>
-     * @refcount 1
      */
     function pg_fetch_all_columns(PgSql\Result $result, int $field = 0): array {}
 

@@ -104,6 +104,8 @@ typedef struct yy_buffer_state *YY_BUFFER_STATE;
 
 #ifdef ZTS
 PHPAPI int basic_globals_id;
+ZEND_TLS_API TSRM_TLS TSRM_TLS_MODEL_ATTR php_basic_globals basic_globals;
+static void *basic_globals_tls_addr(void) { return &basic_globals; }
 #else
 PHPAPI php_basic_globals basic_globals;
 #endif
@@ -277,7 +279,7 @@ PHPAPI double php_get_inf(void) /* {{{ */
 PHP_MINIT_FUNCTION(basic) /* {{{ */
 {
 #ifdef ZTS
-	ts_allocate_id(&basic_globals_id, sizeof(php_basic_globals), (ts_allocate_ctor) basic_globals_ctor, (ts_allocate_dtor) basic_globals_dtor);
+	ts_allocate_tls_id(&basic_globals_id, basic_globals_tls_addr, sizeof(php_basic_globals), (ts_allocate_ctor) basic_globals_ctor, (ts_allocate_dtor) basic_globals_dtor);
 # ifdef PHP_WIN32
 	ts_allocate_id(&php_win32_core_globals_id, sizeof(php_win32_core_globals), (ts_allocate_ctor)php_win32_core_globals_ctor, (ts_allocate_dtor)php_win32_core_globals_dtor );
 # endif
@@ -418,13 +420,6 @@ PHP_RINIT_FUNCTION(basic) /* {{{ */
 
 	/* Setup default context */
 	FG(default_context) = NULL;
-
-	/* Default to global wrappers only */
-	FG(stream_wrappers) = NULL;
-
-	/* Default to global filters only */
-	FG(stream_filters) = NULL;
-
 	return SUCCESS;
 }
 /* }}} */
@@ -456,9 +451,6 @@ PHP_RSHUTDOWN_FUNCTION(basic) /* {{{ */
 			BG(ctype_string) = NULL;
 		}
 	}
-
-	/* FG(stream_wrappers) and FG(stream_filters) are destroyed
-	 * during php_request_shutdown() */
 
 	PHP_RSHUTDOWN(filestat)(SHUTDOWN_FUNC_ARGS_PASSTHRU);
 #ifdef HAVE_SYSLOG_H
@@ -1950,7 +1942,7 @@ PHP_FUNCTION(ini_get_all)
 	zend_ini_sort_entries();
 
 	if (extname) {
-		if ((module = zend_hash_find_ptr(&module_registry, extname)) == NULL) {
+		if ((module = zend_hash_find_ptr_lc(&module_registry, extname)) == NULL) {
 			php_error_docref(NULL, E_WARNING, "Extension \"%pS\" cannot be found", extname);
 			RETURN_FALSE;
 		}

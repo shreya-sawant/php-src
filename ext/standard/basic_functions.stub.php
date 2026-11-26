@@ -1741,7 +1741,6 @@ function array_count_values(array $array): array {}
 
 /**
  * @compile-time-eval
- * @refcount 1
  */
 function array_column(array $array, int|string|null $column_key, int|string|null $index_key = null): array {}
 
@@ -2031,7 +2030,6 @@ function ini_restore(string $option): void {}
 
 function ini_parse_quantity(string $shorthand): int {}
 
-/** @refcount 1 */
 function set_include_path(string $include_path): string|false {}
 
 function get_include_path(): string|false {}

@@ -14,7 +14,7 @@
 */
 
 #include "php.h"
-#include "ext/standard/flock_compat.h"
+#include "main/flock_compat.h"
 #include "ext/standard/file.h"
 #include "ext/standard/basic_functions.h"
 #include "php_ini.h"
@@ -112,7 +112,7 @@ PHP_FUNCTION(stream_socket_client)
 	struct timeval tv;
 	char *hashkey = NULL;
 	php_stream *stream = NULL;
-	int err;
+	int err = 0;
 	zend_long flags = PHP_STREAM_CLIENT_CONNECT;
 	zend_string *errstr = NULL;
 	php_stream_context *context = NULL;
@@ -130,7 +130,7 @@ PHP_FUNCTION(stream_socket_client)
 	RETVAL_FALSE;
 
 	if (timeout_is_null) {
-		timeout = (double)FG(default_socket_timeout);
+		timeout = (double)PG(default_socket_timeout);
 	} else if (!zend_finite(timeout)) {
 		zend_argument_value_error(4, "must be a finite value");
 		RETURN_THROWS();
@@ -290,7 +290,7 @@ PHP_FUNCTION(stream_socket_accept)
 	ZEND_PARSE_PARAMETERS_END();
 
 	if (timeout_is_null) {
-		timeout = (double)FG(default_socket_timeout);
+		timeout = (double)PG(default_socket_timeout);
 	} else if (!zend_finite(timeout)) {
 		zend_argument_value_error(2, "must be a finite value");
 		RETURN_THROWS();
@@ -1697,7 +1697,7 @@ PHP_FUNCTION(stream_is_local)
 	ZEND_PARSE_PARAMETERS_END();
 
 	if (Z_TYPE_P(zstream) == IS_RESOURCE) {
-		php_stream_from_zval(stream, zstream);
+		php_stream_from_res(stream, Z_RES_P(zstream));
 		wrapper = stream->wrapper;
 	} else {
 		if (!try_convert_to_string(zstream)) {

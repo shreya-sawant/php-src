@@ -431,7 +431,7 @@ static zend_result php_zip_parse_options(HashTable *options, zip_options *opts)
 				zend_type_error("Option \"comp_flags\" must be of type int, %s given", zend_zval_value_name(option));
 				return FAILURE;
 			}
-			if (tmp < 0 || tmp > USHRT_MAX) {
+			if (!ZEND_IN_RANGE_OF(tmp, unsigned short)) {
 				php_error_docref(NULL, E_WARNING, "Option \"comp_flags\" must be between 0 and %u", USHRT_MAX);
 			}
 			opts->comp_flags = (zip_uint32_t)tmp;
@@ -649,7 +649,11 @@ static bool php_zipobj_close(ze_zip_object *obj, zend_string **out_str) /* {{{ *
 		archive->close = true;
 		int err = zip_close(intern);
 		if (err) {
-			php_error_docref(NULL, E_WARNING, "%s", zip_strerror(intern));
+			zend_try {
+				php_error_docref(NULL, E_WARNING, "%s", zip_strerror(intern));
+			} zend_catch {
+				archive->bailout_callback = true;
+			} zend_end_try();
 			/* Save error for property reader */
 			zip_error_t *ziperr = zip_get_error(intern);
 			obj->err_zip = zip_error_code_zip(ziperr);
@@ -1173,7 +1177,12 @@ bool php_zip_archive_release(php_zip_archive *archive)
 		int err = zip_close(archive->za);
 		if (err != 0) {
 			if (!archive->bailout_callback) {
-				php_error_docref(NULL, E_WARNING, "Cannot destroy the zip context: %s", zip_strerror(archive->za));
+				/* An error handler that throws during shutdown bails out. */
+				zend_try {
+					php_error_docref(NULL, E_WARNING, "Cannot destroy the zip context: %s", zip_strerror(archive->za));
+				} zend_catch {
+					archive->bailout_callback = true;
+				} zend_end_try();
 			}
 			zip_discard(archive->za);
 		}
@@ -2691,7 +2700,7 @@ PHP_METHOD(ZipArchive, setCompressionName)
 		RETURN_THROWS();
 	}
 
-	if (comp_flags < 0 || comp_flags > USHRT_MAX) {
+	if (!ZEND_IN_RANGE_OF(comp_flags, unsigned short)) {
 		// comp_flags is cast down accordingly in libzip, zip_entry_t compression_level is of zip_uint16_t
 		zend_argument_value_error(3, "must be between 0 and %u", USHRT_MAX);
 		RETURN_THROWS();
@@ -2736,7 +2745,7 @@ PHP_METHOD(ZipArchive, setCompressionIndex)
 		RETURN_THROWS();
 	}
 
-	if (comp_flags < 0 || comp_flags > USHRT_MAX) {
+	if (!ZEND_IN_RANGE_OF(comp_flags, unsigned short)) {
 		// comp_flags is cast down accordingly in libzip, zip_entry_t compression_level is of zip_uint16_t
 		zend_argument_value_error(3, "must be between 0 and %u", USHRT_MAX);
 		RETURN_THROWS();
@@ -3440,7 +3449,7 @@ PHP_METHOD(ZipArchive, isEncryptionMethodSupported)
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "l|b", &method, &enc) == FAILURE) {
 		return;
 	}
-	if (method < 0 || method > USHRT_MAX) {
+	if (!ZEND_IN_RANGE_OF(method, unsigned short)) {
 		zend_argument_value_error(1, "must be between 0 and %u", USHRT_MAX);
 		RETURN_THROWS();
 	}

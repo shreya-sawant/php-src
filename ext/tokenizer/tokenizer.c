@@ -35,6 +35,8 @@
 #define zendcursor LANG_SCNG(yy_cursor)
 #define zendlimit  LANG_SCNG(yy_limit)
 
+static zend_class_entry *php_token_ce;
+
 /* {{{ tokenizer_module_entry */
 zend_module_entry tokenizer_module_entry = {
 	STANDARD_MODULE_HEADER,
@@ -99,7 +101,7 @@ PHP_METHOD(PhpToken, tokenize)
 
 	/* Check construction preconditions in advance, so these are not repeated for each token. */
 	if (token_class->ce_flags & ZEND_ACC_EXPLICIT_ABSTRACT_CLASS) {
-		zend_throw_error(NULL, "Cannot instantiate abstract class %s", ZSTR_VAL(token_class->name));
+		zend_throw_error(NULL, "Cannot instantiate abstract class %pS", token_class->name);
 		RETURN_THROWS();
 	}
 	if (zend_update_class_constants(token_class) == FAILURE) {
@@ -244,7 +246,7 @@ PHP_MINIT_FUNCTION(tokenizer)
 {
 	register_tokenizer_data_symbols(module_number);
 	register_tokenizer_symbols(module_number);
-	register_class_PhpToken(zend_ce_stringable);
+	php_token_ce = register_class_PhpToken(zend_ce_stringable);
 
 	return SUCCESS;
 }

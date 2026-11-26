@@ -2114,7 +2114,7 @@ static ZEND_COLD void zend_ast_export_zval(smart_str *str, const zval *zv, int p
 			break;
 		case IS_DOUBLE:
 			smart_str_append_double(
-				str, Z_DVAL_P(zv), (int) EG(precision), /* zero_fraction */ true);
+				str, Z_DVAL_P(zv), /* precision */ -1, /* zero_fraction */ true);
 			break;
 		case IS_STRING:
 			zend_ast_export_quoted_str(str, Z_STR_P(zv));
@@ -2256,11 +2256,21 @@ static ZEND_COLD void zend_ast_export_hook_list(smart_str *str, const zend_ast_l
 
 	for (uint32_t i = 0; i < hook_list->children; i++) {
 		const zend_ast_decl *hook = (const zend_ast_decl *)hook_list->child[i];
-		zend_ast_export_visibility(str, hook->flags, ZEND_MODIFIER_TARGET_PROPERTY);
+		if (hook->child[4]) {
+			zend_ast_export_attributes(str, hook->child[4], indent, 1);
+		}
 		if (hook->flags & ZEND_ACC_FINAL) {
 			smart_str_appends(str, "final ");
 		}
+		if (hook->flags & ZEND_ACC_RETURN_REFERENCE) {
+			smart_str_appendc(str, '&');
+		}
 		smart_str_append(str, hook->name);
+		if (hook->child[0]) {
+			smart_str_appendc(str, '(');
+			zend_ast_export_ex(str, hook->child[0], 0, indent);
+			smart_str_appendc(str, ')');
+		}
 		zend_ast *body = hook->child[2];
 		if (body == NULL) {
 			smart_str_appendc(str, ';');

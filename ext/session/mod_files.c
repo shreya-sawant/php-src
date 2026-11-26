@@ -75,7 +75,7 @@
 
 #include "php_session.h"
 #include "mod_files.h"
-#include "ext/standard/flock_compat.h"
+#include "main/flock_compat.h"
 #include "php_open_temporary_file.h"
 
 #define FILE_PREFIX "sess_"
@@ -228,6 +228,11 @@ static zend_result ps_files_write(ps_files *data, zend_string *key, zend_string 
 		return FAILURE;
 	}
 
+	if (ftruncate(data->fd, 0) != 0) {
+		php_error_docref(NULL, E_WARNING, "ftruncate() failed: %s (%d)", strerror(errno), errno);
+		return FAILURE;
+	}
+
 #ifdef HAVE_PWRITE
 	n = pwrite(data->fd, ZSTR_VAL(val), ZSTR_LEN(val), 0);
 #else
@@ -260,12 +265,6 @@ static zend_result ps_files_write(ps_files *data, zend_string *key, zend_string 
 		}
 		return FAILURE;
 	}
-
-	if (ZSTR_LEN(val) < data->st_size) {
-		php_ignore_value(ftruncate(data->fd, ZSTR_LEN(val)));
-	}
-
-	data->st_size = ZSTR_LEN(val);
 
 	return SUCCESS;
 }
@@ -328,8 +327,8 @@ static int ps_files_cleanup_dir(const zend_string *dirname, zend_long maxlifetim
 				nrdels++;
 			}
 		} else {
-			/* intermediate depth: recurse into subdirectories */
-			if (VCWD_STAT(buf, &sbuf) != 0) {
+			/* intermediate depth: recurse into subdirectories, never through symlinks */
+			if (VCWD_LSTAT(buf, &sbuf) != 0) {
 				continue;
 			}
 			if (S_ISDIR(sbuf.st_mode)) {

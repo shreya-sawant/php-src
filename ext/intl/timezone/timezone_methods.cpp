@@ -133,7 +133,7 @@ PHP_INTL_FUNCTION_WITH_ERROR_RESET(intltz_create_enumeration)
 	} else if (timezone != nullptr) {
 		se = TimeZone::createEnumeration(ZSTR_VAL(timezone));
 	} else {
-		if (UNEXPECTED(ZEND_LONG_EXCEEDS_INT(timezone_shift))) {
+		if (!ZEND_IN_RANGE_OF(timezone_shift, int32_t)) {
 			zend_argument_value_error(1, "must be between %d and %d", INT32_MIN, INT32_MAX);
 			RETURN_THROWS();
 		}
@@ -196,7 +196,7 @@ PHP_INTL_FUNCTION_WITH_ERROR_RESET(intltz_create_time_zone_id_enumeration)
 	}
 
 	if (!arg3isnull) {
-		if (UNEXPECTED(ZEND_LONG_EXCEEDS_INT(offset_arg))) {
+		if (!ZEND_IN_RANGE_OF(offset_arg, int32_t)) {
 			zend_argument_value_error(3, "must be between %d and %d", INT32_MIN, INT32_MAX);
 			RETURN_THROWS();
 		}
@@ -294,7 +294,7 @@ PHP_INTL_FUNCTION_WITH_ERROR_RESET(intltz_get_equivalent_id)
 		Z_PARAM_LONG(index)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if (UNEXPECTED(ZEND_LONG_EXCEEDS_INT(index))) {
+	if (!ZEND_IN_RANGE_OF(index, int32_t)) {
 		zend_argument_value_error(2, "must be between %d and %d", INT32_MIN, INT32_MAX);
 		RETURN_THROWS();
 	}
@@ -581,7 +581,7 @@ U_CFUNC PHP_FUNCTION(intltz_get_windows_id)
 	ZEND_PARSE_PARAMETERS_END();
 
 	error = U_ZERO_ERROR;
-	if (intl_stringFromChar(uID, id->val, id->len, &error) == FAILURE) {
+	if (intl_stringFromChar(uID, ZSTR_VAL(id), ZSTR_LEN(id), &error) == FAILURE) {
 		intl_error_set(NULL, error,
 		               "could not convert time zone id to UTF-16");
 		RETURN_FALSE;
@@ -619,14 +619,14 @@ U_CFUNC PHP_FUNCTION(intltz_get_id_for_windows_id)
 	ZEND_PARSE_PARAMETERS_END();
 
 	error = U_ZERO_ERROR;
-	if (intl_stringFromChar(uWinID, winID->val, winID->len, &error) == FAILURE) {
+	if (intl_stringFromChar(uWinID, ZSTR_VAL(winID), ZSTR_LEN(winID), &error) == FAILURE) {
 		intl_error_set(NULL, error,
 		               "could not convert time zone id to UTF-16");
 		RETURN_FALSE;
 	}
 
 	error = U_ZERO_ERROR;
-	TimeZone::getIDForWindowsID(uWinID, region ? region->val : NULL, uID, error);
+	TimeZone::getIDForWindowsID(uWinID, region ? ZSTR_VAL(region) : NULL, uID, error);
 	INTL_CHECK_STATUS(error, "unable to get windows ID for timezone");
 	if (uID.length() == 0) {
 		intl_error_set(NULL, U_ILLEGAL_ARGUMENT_ERROR,

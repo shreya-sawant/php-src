@@ -20,7 +20,6 @@
 #endif
 
 #include "php.h"
-#include "ext/standard/file.h"
 #include "ext/uri/php_uri.h"
 #include "streams/php_streams_int.h"
 #include "zend_smart_str.h"
@@ -347,16 +346,17 @@ static int php_openssl_handle_ssl_error(php_stream *stream, int nr_bytes, bool i
 						smart_str_appends(&ebuf, esbuf);
 					} while ((ecode = ERR_get_error()) != 0);
 
-					smart_str_0(&ebuf);
-
-					php_stream_warn(stream, ProtocolError,
-							"SSL operation failed with code %d. %s%s",
-							err,
-							ebuf.s ? "OpenSSL Error messages:\n" : "",
-							ebuf.s ? ZSTR_VAL(ebuf.s) : "");
-					if (ebuf.s) {
-						smart_str_free(&ebuf);
+					zend_string *openssl_error = smart_str_extract(&ebuf);
+					if (ZSTR_LEN(openssl_error) == 0) {
+						php_stream_warn(stream, ProtocolError,
+								"SSL operation failed with code %d.",
+								err);
+					} else {
+						php_stream_warn(stream, ProtocolError,
+								"SSL operation failed with code %d. OpenSSL Error messages:\n%pS",
+								err, openssl_error);
 					}
+					zend_string_release_ex(openssl_error, false);
 			}
 
 			retry = false;
@@ -631,11 +631,7 @@ static bool php_openssl_matches_common_name(php_stream *stream, const X509 *peer
 	}
 	name_asn1 = X509_NAME_ENTRY_get_data(name_entry);
 	cert_name_len = ASN1_STRING_get_length(name_asn1);
-	cert_name = (unsigned char *) OPENSSL_strndup((const char *) ASN1_STRING_get0_data(name_asn1), cert_name_len);
-	if (cert_name == NULL) {
-		php_stream_warn(stream, NetworkRecvFailed, "Unable to locate peer certificate CN");
-		return false;
-	}
+	cert_name = (unsigned char *) estrndup((const char *) ASN1_STRING_get0_data(name_asn1), cert_name_len);
 
 	if ((size_t)cert_name_len != strlen((const char *)cert_name)) {
 		php_stream_warn(stream, AuthFailed, "Peer certificate CN=`%.*s' is malformed", cert_name_len, (const char *)cert_name);
@@ -647,7 +643,7 @@ static bool php_openssl_matches_common_name(php_stream *stream, const X509 *peer
 			cert_name_len, (const char *)cert_name, subject_name);
 	}
 
-	OPENSSL_free(cert_name);
+	efree(cert_name);
 
 	return is_match;
 }
@@ -1519,8 +1515,8 @@ static zend_result php_openssl_enable_server_sni(
 					local_cert_str, resolved_cert_path_buff, 0, false, false,
 					"SNI_server_certs local_cert in ssl stream context", stream)) {
 				php_stream_warn(stream, OpenFailed,
-					"Failed setting local cert chain file `%s'; could not open file",
-					ZSTR_VAL(local_cert_str)
+					"Failed setting local cert chain file `%pS'; could not open file",
+					local_cert_str
 				);
 				zend_string_release(local_cert_str);
 				return FAILURE;
@@ -1544,8 +1540,8 @@ static zend_result php_openssl_enable_server_sni(
 					local_pk_str, resolved_pk_path_buff, 0, false, false,
 					"SNI_server_certs local_pk in ssl stream context", stream)) {
 				php_stream_warn(stream, OpenFailed,
-					"Failed setting local private key file `%s';  could not open file",
-					ZSTR_VAL(local_pk_str)
+					"Failed setting local private key file `%pS';  could not open file",
+					local_pk_str
 				);
 				zend_string_release(local_pk_str);
 				return FAILURE;
@@ -1558,8 +1554,8 @@ static zend_result php_openssl_enable_server_sni(
 				ctx = php_openssl_create_sni_server_ctx(stream, resolved_path_buff, resolved_path_buff);
 			} else {
 				php_stream_warn(stream, NotFound,
-						"Failed setting local cert chain file `%s'; file not found",
-						Z_STRVAL_P(current)
+						"Failed setting local cert chain file `%pS'; file not found",
+						Z_STR_P(current)
 				);
 			}
 		} else {
@@ -3725,9 +3721,9 @@ static int php_openssl_sockop_set_option(php_stream *stream, int option, int val
 				if (value == -1) {
 					if (sslsock->s.timeout.tv_sec == -1) {
 #ifdef _WIN32
-						tv.tv_sec = (long)FG(default_socket_timeout);
+						tv.tv_sec = (long)PG(default_socket_timeout);
 #else
-						tv.tv_sec = (time_t)FG(default_socket_timeout);
+						tv.tv_sec = (time_t)PG(default_socket_timeout);
 #endif
 						tv.tv_usec = 0;
 					} else {
@@ -4098,9 +4094,9 @@ php_stream *php_openssl_ssl_socket_factory(const char *proto, size_t protolen,
 	sslsock->s.is_blocked = true;
 	/* this timeout is used by standard stream funcs, therefore it should use the default value */
 #ifdef _WIN32
-	sslsock->s.timeout.tv_sec = (long)FG(default_socket_timeout);
+	sslsock->s.timeout.tv_sec = (long)PG(default_socket_timeout);
 #else
-	sslsock->s.timeout.tv_sec = (time_t)FG(default_socket_timeout);
+	sslsock->s.timeout.tv_sec = (time_t)PG(default_socket_timeout);
 #endif
 	sslsock->s.timeout.tv_usec = 0;
 

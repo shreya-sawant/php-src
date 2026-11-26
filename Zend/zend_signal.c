@@ -43,7 +43,8 @@
 
 #ifdef ZTS
 ZEND_API int zend_signal_globals_id;
-ZEND_API size_t zend_signal_globals_offset;
+ZEND_TLS_API TSRM_TLS TSRM_TLS_MODEL_ATTR zend_signal_globals_t zend_signal_globals;
+static void *zend_signal_globals_tls_addr(void) { return &zend_signal_globals; }
 #else
 ZEND_API zend_signal_globals_t zend_signal_globals;
 #endif /* not ZTS */
@@ -199,7 +200,6 @@ static void zend_signal_handler(int signo, siginfo_t *siginfo, void *context)
 				/* throw away any blocked signals */
 				zend_sigprocmask(SIG_UNBLOCK, &sigset, NULL);
 #ifdef ZTS
-# define RAISE_ERROR "raise() failed\n"
 				if (raise(signo) != 0) {
 					/* On some systems raise() fails with errno 3: No such process */
 					kill(getpid(), signo);
@@ -412,7 +412,7 @@ ZEND_API void zend_signal_startup(void)
 {
 
 #ifdef ZTS
-	ts_allocate_fast_id(&zend_signal_globals_id, &zend_signal_globals_offset, sizeof(zend_signal_globals_t), (ts_allocate_ctor) zend_signal_globals_ctor, NULL);
+	ts_allocate_tls_id(&zend_signal_globals_id, zend_signal_globals_tls_addr, sizeof(zend_signal_globals_t), (ts_allocate_ctor) zend_signal_globals_ctor, NULL);
 #else
 	zend_signal_globals_ctor(&zend_signal_globals);
 #endif

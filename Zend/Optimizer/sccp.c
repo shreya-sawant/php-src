@@ -560,6 +560,9 @@ static inline zend_result ct_eval_add_array_unpack(zval *result, const zval *arr
 	ZEND_HASH_FOREACH_STR_KEY_VAL(Z_ARRVAL_P(array), key, value) {
 		if (key) {
 			value = zend_hash_update(Z_ARR_P(result), key, value);
+		} else if (IS_PARTIAL_ARRAY(result)) {
+			/* The next free index of a partial array is unknown. */
+			continue;
 		} else {
 			value = zend_hash_next_index_insert(Z_ARR_P(result), value);
 		}
@@ -763,9 +766,6 @@ static inline zend_result ct_eval_array_key_exists(zval *result, const zval *op1
 	zval *value;
 
 	if (Z_TYPE_P(op2) != IS_ARRAY && !IS_PARTIAL_ARRAY(op2)) {
-		return FAILURE;
-	}
-	if (Z_TYPE_P(op1) != IS_STRING && Z_TYPE_P(op1) != IS_LONG && Z_TYPE_P(op1) != IS_NULL) {
 		return FAILURE;
 	}
 	if (fetch_array_elem(&value, op2, op1) == FAILURE) {

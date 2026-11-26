@@ -1,0 +1,51 @@
+name: Build and install Firebird (s390x)
+description: >-
+  Ubuntu 24.04 only packages Firebird 3.0, whose 31 character identifier limit
+  breaks many PDO_Firebird tests (the LINUX_X64 service image uses a newer
+  Firebird). Build Firebird 4.0 from source into /opt/firebird instead.
+  The runner is persistent, so the build is skipped if that version is already
+  installed.
+inputs:
+  version:
+    default: '4.0.6'
+    required: false
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        FB_VERSION: ${{ inputs.version }}
+      run: |
+        set -ex
+        FB_HOME=/opt/firebird
+        # The persistent runner may still have the distro Firebird 3.0 from earlier
+        # runs. It holds port 3050 and ships its own libfbclient, so remove it.
+        sudo systemctl disable --now firebird3.0.service || true
+        sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y 'firebird3.0*' firebird-dev || true
+        if [ -x "$FB_HOME/bin/isql" ] && "$FB_HOME/bin/isql" -z 2>&1 | grep -q "$FB_VERSION"; then
+          echo "Firebird $FB_VERSION already installed in $FB_HOME, skipping build."
+        else
+          SRC="$RUNNER_TEMP/firebird-src"
+          rm -rf "$SRC"
+          git clone --depth 1 --branch "v$FB_VERSION" https://github.com/FirebirdSQL/firebird.git "$SRC"
+          cd "$SRC"
+          ./autogen.sh --prefix="$FB_HOME" --with-builtin-tommath
+          make -j"$(/usr/bin/nproc)"
+          make dist
+          # make dist writes a Firebird-*.tar.gz below gen/; locate it rather
+          # than hardcoding the directory.
+          TARBALL=$(find gen -name 'Firebird-*.tar.gz' | head -n 1)
+          test -n "$TARBALL"
+          rm -rf "$RUNNER_TEMP/firebird-dist"
+          mkdir "$RUNNER_TEMP/firebird-dist"
+          tar -xzf "$TARBALL" -C "$RUNNER_TEMP/firebird-dist" --strip-components=1
+          # Stop any other Firebird (e.g. a previous install) holding port 3050.
+          sudo systemctl stop firebird-superserver.service || true
+          (cd "$RUNNER_TEMP/firebird-dist" && sudo ./install.sh -silent)
+          cd /
+          rm -rf "$SRC" "$RUNNER_TEMP/firebird-dist"
+        fi
+        # Let the PHP build and the tests find libfbclient.so.
+        echo "$FB_HOME/lib" | sudo tee /etc/ld.so.conf.d/firebird.conf
+        sudo ldconfig
+        "$FB_HOME/bin/isql" -z

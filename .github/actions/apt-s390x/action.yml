@@ -72,8 +72,10 @@ runs:
           dovecot-pop3d \
           dovecot-imapd \
           sendmail \
-          firebird-dev \
-          firebird3.0-server \
+          libtool \
+          automake \
+          libncurses-dev \
+          zlib1g-dev \
           liblmdb-dev \
           libtokyocabinet-dev \
           libdb-dev \

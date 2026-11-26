@@ -276,6 +276,11 @@ jobs:
           echo "CCACHE_CONFIGPATH=$RUNNER_TEMP/ccache.conf" >> "$GITHUB_ENV"
           echo "CC=ccache gcc" >> "$GITHUB_ENV"
           echo "CXX=ccache g++" >> "$GITHUB_ENV"
+      # Ubuntu 24.04 only has Firebird 3.0 (31 character identifier limit), so
+      # build Firebird 4.0 from source. Needed before ./configure (libfbclient).
+      - name: Firebird
+        if: ${{ !matrix.asan || inputs.all_variations }}
+        uses: ./.github/actions/setup-firebird-s390x
       - name: ./configure
         uses: ./.github/actions/configure-s390x
         with:
@@ -319,14 +324,21 @@ jobs:
           sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='test'" | grep -q 1 \
             || sudo -u postgres createdb test
           # Firebird: same credentials as the LINUX_X64 service (test/test, db "test.fdb").
-          # UNVERIFIED on s390x: paths and user creation follow the Debian/Ubuntu
-          # firebird3.0-server package layout.
-          sudo service firebird3.0 start
+          # Firebird 4.0 built from source into /opt/firebird by the "Firebird" step.
+          # UNVERIFIED on s390x: paths and service name follow the upstream
+          # install.sh layout.
+          FB_HOME=/opt/firebird
+          # Unit name differs between Firebird releases, so look it up.
+          FB_UNIT=$(systemctl list-unit-files --no-legend 'firebird*.service' | awk 'NR==1{print $1}')
+          test -n "$FB_UNIT"
+          sudo systemctl enable "$FB_UNIT" || true
+          sudo systemctl restart "$FB_UNIT"
           # The file stores the password quoted (ISC_PASSWORD="..."), so strip the quotes.
-          FB_SYSDBA_PASSWORD=$(sudo sed -n 's/^ISC_PASSWORD=//p' /etc/firebird/3.0/SYSDBA.password | tr -d '"')
-          FB_DB=/var/lib/firebird/3.0/data/test.fdb
-          grep -q '^test.fdb' /etc/firebird/3.0/databases.conf \
-            || { echo "test.fdb = $FB_DB" | sudo tee -a /etc/firebird/3.0/databases.conf; sudo service firebird3.0 restart; }
+          FB_SYSDBA_PASSWORD=$(sudo sed -n 's/^ISC_PASSWORD=//p' "$FB_HOME/SYSDBA.password" | tr -d '"')
+          FB_DB=/var/lib/firebird/data/test.fdb
+          sudo install -d -o firebird -g firebird /var/lib/firebird/data
+          grep -q '^test.fdb' "$FB_HOME/databases.conf" \
+            || { echo "test.fdb = $FB_DB" | sudo tee -a "$FB_HOME/databases.conf"; sudo systemctl restart "$FB_UNIT"; }
           # The tests run DDL as "test", so "test" must own the database (the
           # jacobalberty/firebird image used on x64 is assumed to do the same).
           # A database owner cannot be changed, so recreate it on every run:
@@ -338,16 +350,16 @@ jobs:
           # UNVERIFIED: that this is sufficient for the tests' DDL on s390x.
           sudo rm -f "$FB_DB"
           echo "CREATE DATABASE 'localhost:$FB_DB' USER 'SYSDBA' PASSWORD '$FB_SYSDBA_PASSWORD';" \
-            | sudo isql-fb -q
+            | sudo "$FB_HOME/bin/isql" -q
           # Run both statements so the result is the same whether or not the
           # user already exists from a previous run (the runner is persistent).
           echo "CREATE USER test PASSWORD 'test' GRANT ADMIN ROLE;" \
-            | sudo isql-fb -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB" || true
+            | sudo "$FB_HOME/bin/isql" -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB" || true
           echo "ALTER USER test SET PASSWORD 'test' GRANT ADMIN ROLE;" \
-            | sudo isql-fb -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB" || true
+            | sudo "$FB_HOME/bin/isql" -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB" || true
           sudo rm -f "$FB_DB"
           echo "CREATE DATABASE 'localhost:$FB_DB' USER 'test' PASSWORD 'test' ROLE 'RDB\$ADMIN';" \
-            | sudo isql-fb -q
+            | sudo "$FB_HOME/bin/isql" -q
           # Enable IPv6 on loopback so the ::1 based tests (sockets, snmp, ...) work.
           # Best effort: ignored if the runner does not allow changing sysctls.
           sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0 net.ipv6.conf.lo.disable_ipv6=0 || true

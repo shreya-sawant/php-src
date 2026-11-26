@@ -57,6 +57,7 @@ function select_jobs($repository, $trigger, $nightly, $labels, $php_version, $re
     $test_freebsd = in_array('CI: FreeBSD', $labels, true);
     $test_libmysqlclient = in_array('CI: libmysqlclient', $labels, true);
     $test_linux_ppc64 = in_array('CI: Linux PPC64', $labels, true);
+    $test_linux_s390x = in_array('CI: Linux S390X', $labels, true);
     $test_linux_x32 = in_array('CI: Linux X32', $labels, true);
     $test_linux_x64 = in_array('CI: Linux X64', $labels, true);
     $test_macos = in_array('CI: macOS', $labels, true);
@@ -97,6 +98,29 @@ function select_jobs($repository, $trigger, $nightly, $labels, $php_version, $re
     }
     if (version_compare($php_version, '8.4', '>=') && ($all_jobs || $test_linux_ppc64)) {
         $jobs['LINUX_PPC64'] = true;
+    }
+    if (version_compare($php_version, '8.4', '>=') && ($all_jobs || $test_linux_s390x)) {
+        // Same matrix as LINUX_X64. s390x has no PHP JIT (see ext/opcache/config.m4),
+        // which only affects the JIT test steps in the workflow, not the matrix.
+        $jobs['LINUX_S390X']['matrix'] = $all_variations
+            ? [
+                'name' => [''],
+                'asan' => [false],
+                'debug' => [true, false],
+                'repeat' => [false],
+                'variation' => [false],
+                'zts' => [true, false],
+                'include' => [
+                    ['name' => '_ASAN', 'asan' => true, 'debug' => true, 'repeat' => false, 'variation' => false, 'zts' => true],
+                    ['name' => '_REPEAT', 'asan' => false, 'debug' => true, 'repeat' => true, 'variation' => false, 'zts' => false],
+                    ['name' => '_VARIATION', 'asan' => false, 'debug' => true, 'repeat' => false, 'variation' => true, 'zts' => true],
+                ],
+            ]
+            : ['include' => [
+                ['name' => '', 'asan' => false, 'debug' => false, 'repeat' => false, 'variation' => false, 'zts' => false],
+                ['name' => '_ASAN', 'asan' => true, 'debug' => true, 'repeat' => false, 'variation' => false, 'zts' => true],
+            ]];
+        $jobs['LINUX_S390X']['config']['variation_enable_zend_max_execution_timers'] = version_compare($php_version, '8.3', '>=');
     }
     if ($all_jobs || !$no_jobs || $test_linux_x64) {
         $jobs['LINUX_X64']['matrix'] = $all_variations

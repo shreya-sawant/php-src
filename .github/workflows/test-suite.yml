@@ -224,6 +224,179 @@ jobs:
         uses: ./.github/actions/extra-tests
       - name: Verify generated files are up to date
         uses: ./.github/actions/verify-generated-files
+  LINUX_S390X:
+    if: ${{ fromJson(inputs.branch).jobs.LINUX_S390X }}
+    # No Docker services: the MySQL, PostgreSQL and Firebird images are not
+    # available for s390x. Instead the "Setup" step starts the distro packages
+    # on the host with the same credentials that LINUX_X64 uses (see test-linux).
+    # There is no MSSQL for s390x, so pdo_dblib and the MSSQL ODBC tests skip.
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(inputs.branch).jobs.LINUX_S390X.matrix }}
+    name: "LINUX_S390X${{ matrix.name }}_${{ matrix.debug && 'DEBUG' || 'RELEASE' }}_${{ matrix.zts && 'ZTS' || 'NTS' }}"
+    # This runs on a self-hosted runner; see https://wiki.php.net/systems/ci
+    runs-on: [self-hosted, linux, s390x]
+    timeout-minutes: 180
+    env:
+      # /home/runner/.config/ is not writable on this self-hosted runner
+      # (owned by a different system user). Redirect both gh and ccache to
+      # the per-job runner temp dir which is always writable.
+      # runner.temp is not available at job-level env, use $RUNNER_TEMP instead.
+      GH_CONFIG_DIR: $RUNNER_TEMP/gh-config
+      CCACHE_CONFIGPATH: $RUNNER_TEMP/ccache.conf
+      CCACHE_DIR: $RUNNER_TEMP/ccache
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ fromJson(inputs.branch).ref }}
+      # MSSQL has no s390x image; skipped.
+      - name: apt
+        uses: ./.github/actions/apt-s390x
+        with:
+          asan: ${{ matrix.asan && 'true' || 'false' }}
+      - name: System info
+        run: |
+          echo "::group::Show host CPU info"
+          lscpu
+          echo "::endgroup::"
+          echo "::group::Show installed package versions"
+          dpkg -l
+          echo "::endgroup::"
+      - name: Setup Caddy server
+        uses: ./.github/actions/setup-caddy-s390x
+      - name: ccache
+        uses: ./.github/actions/ccache
+        with:
+          name: "LINUX_S390X${{ matrix.name }}_${{ matrix.debug && 'DEBUG' || 'RELEASE' }}_${{ matrix.zts && 'ZTS' || 'NTS' }}"
+      - name: ./configure
+        uses: ./.github/actions/configure-s390x
+        with:
+          configurationParameters: >-
+            ${{ matrix.asan && 'CFLAGS="-fsanitize=undefined,address -DZEND_TRACK_ARENA_ALLOC" LDFLAGS="-fsanitize=undefined,address"' || '' }}
+            ${{ matrix.variation && 'CFLAGS="-DZEND_RC_DEBUG=1 -DPROFITABILITY_CHECKS=0 -DZEND_VERIFY_FUNC_INFO=1"' || '' }}
+            ${{ (matrix.variation && fromJson(inputs.branch).jobs.LINUX_S390X.config.variation_enable_zend_max_execution_timers) && '--enable-zend-max-execution-timers' || '' }}
+            --${{ matrix.debug && 'enable' || 'disable' }}-debug
+            ${{ matrix.debug && 'CXXFLAGS="-D_GLIBCXX_ASSERTIONS"' || '' }}
+            --${{ matrix.zts && 'enable' || 'disable' }}-zts
+          asan: ${{ matrix.asan && 'true' || 'false' }}
+          skipSlow: ${{ (matrix.asan && !inputs.all_variations) && 'true' || 'false' }}
+      - name: make
+        run: make -j$(/usr/bin/nproc) >/dev/null
+      - name: make install
+        uses: ./.github/actions/install-linux
+      - name: Setup
+        if: ${{ !matrix.asan || inputs.all_variations }}
+        run: |
+          set -x
+          # Self-hosted runners are persistent, so slapd may already have been
+          # configured by a previous job. setup-slapd.sh is not idempotent
+          # (ldapmodify "add:" fails if the value exists), so reset slapd to a
+          # clean default configuration first.
+          sudo service slapd stop || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y slapd
+          sudo rm -rf /etc/ldap/slapd.d /var/lib/ldap /etc/ldap/ssl
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y slapd
+          sudo service slapd start
+          sudo locale-gen de_DE
+          ./.github/scripts/setup-slapd.sh
+          # MySQL: same credentials as the LINUX_X64 service (root/root, db "test").
+          # The runner is persistent: on the first run root authenticates via the
+          # unix socket (no password), afterwards it needs the password set here.
+          sudo service mysql start
+          sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'root'; CREATE DATABASE IF NOT EXISTS test;" \
+            || mysql -h localhost -uroot -proot -e "CREATE DATABASE IF NOT EXISTS test;"
+          # PostgreSQL: same credentials as the LINUX_X64 service (postgres/postgres, db "test").
+          sudo service postgresql start
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+          sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='test'" | grep -q 1 \
+            || sudo -u postgres createdb test
+          # Firebird: same credentials as the LINUX_X64 service (test/test, db "test.fdb").
+          # UNVERIFIED on s390x: paths and user creation follow the Debian/Ubuntu
+          # firebird3.0-server package layout.
+          sudo service firebird3.0 start
+          # The file stores the password quoted (ISC_PASSWORD="..."), so strip the quotes.
+          FB_SYSDBA_PASSWORD=$(sudo sed -n 's/^ISC_PASSWORD=//p' /etc/firebird/3.0/SYSDBA.password | tr -d '"')
+          FB_DB=/var/lib/firebird/3.0/data/test.fdb
+          grep -q '^test.fdb' /etc/firebird/3.0/databases.conf \
+            || { echo "test.fdb = $FB_DB" | sudo tee -a /etc/firebird/3.0/databases.conf; sudo service firebird3.0 restart; }
+          # The tests run DDL as "test", so "test" must own the database (the
+          # jacobalberty/firebird image used on x64 is assumed to do the same).
+          # A database owner cannot be changed, so recreate it on every run:
+          # create a throw-away DB as SYSDBA to be able to manage users, then
+          # replace it with one owned by "test".
+          # A plain Firebird user is not allowed to create databases ("no
+          # permission for CREATE access to DATABASE"), so "test" is made an
+          # admin and creates the database with ROLE RDB$ADMIN.
+          # UNVERIFIED: that this is sufficient for the tests' DDL on s390x.
+          sudo rm -f "$FB_DB"
+          echo "CREATE DATABASE 'localhost:$FB_DB' USER 'SYSDBA' PASSWORD '$FB_SYSDBA_PASSWORD';" \
+            | sudo isql-fb -q
+          # Run both statements so the result is the same whether or not the
+          # user already exists from a previous run (the runner is persistent).
+          echo "CREATE USER test PASSWORD 'test' GRANT ADMIN ROLE;" \
+            | sudo isql-fb -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB" || true
+          echo "ALTER USER test SET PASSWORD 'test' GRANT ADMIN ROLE;" \
+            | sudo isql-fb -q -user SYSDBA -password "$FB_SYSDBA_PASSWORD" "localhost:$FB_DB" || true
+          sudo rm -f "$FB_DB"
+          echo "CREATE DATABASE 'localhost:$FB_DB' USER 'test' PASSWORD 'test' ROLE 'RDB\$ADMIN';" \
+            | sudo isql-fb -q
+          sudo cp ext/snmp/tests/snmpd.conf /etc/snmp
+          sudo cp ext/snmp/tests/bigtest /etc/snmp
+          # snmpd.conf binds udp6:[::1]:161. If IPv6 is disabled on the host
+          # (net.ipv6.conf.all.disable_ipv6 = 1) snmpd cannot open that endpoint
+          # and exits, so drop the IPv6 listener from the installed copy only.
+          # NOTE: the IPv6 SNMP tests (ipv6.phpt, bug64124.phpt) do not skip when
+          # IPv6 is disabled, so they will fail on such a host.
+          # The shared test config is left untouched.
+          if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" = "1" ]; then
+            sudo sed -i \
+              -e 's|^agentaddress .*|agentaddress udp:127.0.0.1:161|' \
+              -e '/^rocommunity6 /d' \
+              /etc/snmp/snmpd.conf
+          fi
+          # On self-hosted runners snmpd may already be running from a previous
+          # job and hold port 161, causing restart to fail. Stop it first, wait
+          # for the port to be released, then start fresh.
+          sudo service snmpd stop || true
+          sleep 2
+          if ! sudo service snmpd start; then
+            # Print why snmpd failed so the real cause is visible in the log.
+            echo "::group::snmpd diagnostics"
+            sudo systemctl status snmpd.service --no-pager -l || true
+            sudo journalctl -xeu snmpd.service --no-pager -n 50 || true
+            echo "--- UDP listeners on port 161 ---"
+            sudo ss -ulnp | grep ':161' || echo "nothing listening on 161"
+            echo "--- IPv6 enabled? (0 = yes, 1 = disabled) ---"
+            cat /proc/sys/net/ipv6/conf/all/disable_ipv6 || true
+            echo "::endgroup::"
+            exit 1
+          fi
+      - name: Test
+        if: ${{ inputs.all_variations || !matrix.asan }}
+        uses: ./.github/actions/test-linux
+        with:
+          runTestsParameters: >-
+            ${{ matrix.asan && '--asan' || '' }}
+            ${{ matrix.repeat && '--repeat 2' || '' }}
+            ${{ matrix.variation && '-d zend_test.observer.enabled=1 -d zend_test.observer.show_output=0' || '' }}
+          idleCpu: ${{ matrix.asan && 'true' || 'false' }}
+      - name: Test OpCache
+        if: ${{ inputs.all_variations || matrix.asan }}
+        uses: ./.github/actions/test-linux
+        with:
+          enableOpcache: true
+          runTestsParameters: >-
+            ${{ matrix.asan && '--asan' || '' }}
+            ${{ (matrix.asan && !inputs.all_variations) && '-x' || '' }}
+            ${{ matrix.repeat && '--repeat 2' || '' }}
+            ${{ matrix.variation && '-d zend_test.observer.enabled=1 -d zend_test.observer.show_output=0' || '' }}
+      # s390x has no PHP JIT (ext/opcache/config.m4 only enables it on x86/aarch64),
+      # so the Tracing JIT and Function JIT steps from LINUX_X64 are omitted.
+      - name: Extra tests
+        uses: ./.github/actions/extra-tests
+      - name: Verify generated files are up to date
+        uses: ./.github/actions/verify-generated-files
   LINUX_X32:
     if: ${{ fromJson(inputs.branch).jobs.LINUX_X32 }}
     strategy:

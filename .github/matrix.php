@@ -99,7 +99,9 @@ function select_jobs($repository, $trigger, $nightly, $labels, $php_version, $re
     if (version_compare($php_version, '8.4', '>=') && ($all_jobs || $test_linux_ppc64)) {
         $jobs['LINUX_PPC64'] = true;
     }
-    if (version_compare($php_version, '8.4', '>=') && ($all_jobs || $test_linux_s390x)) {
+    // TEMP(s390x-testing): nightly runs are limited to master, and manual runs
+    // always enable this job. Revert both before upstreaming.
+    if (version_compare($php_version, '8.4', '>=') && (($all_jobs && $ref === 'master') || $test_linux_s390x || $trigger === 'workflow_dispatch')) {
         // Same matrix as LINUX_X64. s390x has no PHP JIT (see ext/opcache/config.m4),
         // which only affects the JIT test steps in the workflow, not the matrix.
         $jobs['LINUX_S390X']['matrix'] = $all_variations
@@ -184,6 +186,10 @@ function select_jobs($repository, $trigger, $nightly, $labels, $php_version, $re
             ? ['zts' => [true, false]]
             : ['zts' => [false]];
     }
+    // TEMP(s390x-testing): manual runs only run the s390x job. Revert before upstreaming.
+    if ($trigger === 'workflow_dispatch') {
+        return array_intersect_key($jobs, ['LINUX_S390X' => true]);
+    }
     return $jobs;
 }
 
@@ -198,7 +204,9 @@ if ($discard_cache) {
 }
 $branch = $argv[3] ?? 'master';
 $nightly = $trigger === 'schedule' || $trigger === 'workflow_dispatch';
-$branches = $nightly && $branch === 'master'
+// TEMP(s390x-testing): manual runs use a single "Suite" entry instead of every
+// branch in BRANCHES. Revert before upstreaming.
+$branches = $nightly && $branch === 'master' && $trigger !== 'workflow_dispatch'
     ? get_branches()
     : [['name' => 'Suite', 'ref' => $branch, 'version' => get_current_version()]];
 
